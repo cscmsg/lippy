@@ -66,11 +66,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.bufferLock.unlock()
         }
 
-        AudioRecorder.requestPermission { granted in
-            if !granted {
-                self.hud.show(.failed("Microphone access denied — grant it in System Settings"))
-            }
-        }
+        // Asked again on first use in beginRecording(). An accessory app's TCC
+        // dialog can appear behind other windows and sit there unnoticed, so a
+        // launch-time request alone is not enough to rely on.
+        AudioRecorder.requestPermission { _ in }
 
         if !HotkeyMonitor.hasAccessibilityPermission {
             HotkeyMonitor.promptForAccessibility()
@@ -97,6 +96,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func beginRecording() {
         guard recordingStart == nil else { return }
+
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            break
+        case .notDetermined:
+            // Activating puts the permission dialog in front of the user. It
+            // steals focus, which normally would break the paste target -- but
+            // this branch is not going to paste anything anyway.
+            NSApp.activate(ignoringOtherApps: true)
+            AudioRecorder.requestPermission { [weak self] granted in
+                self?.hud.show(granted
+                    ? .done("Microphone granted — hold the key again")
+                    : .failed("Microphone denied — System Settings › Privacy › Microphone"))
+            }
+            return
+        default:
+            hud.show(.failed("Microphone denied — System Settings › Privacy › Microphone"))
+            NSWorkspace.shared.open(URL(
+                string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
+            return
+        }
 
         // Captured before the HUD appears, while the real target is still
         // frontmost -- it is what tells the polish pass whether this is going
