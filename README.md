@@ -119,6 +119,27 @@ going long.
   Shift, Fn).
 - **Copy Last Transcript** recovers text if a paste went somewhere unexpected.
 
+### When there is nowhere to paste
+
+Dictating into a window with no editable field would otherwise lose the text
+silently: ⌘V goes to whatever has focus, and if that is a file list or a web
+page, nothing happens and the words are gone. Two guards:
+
+- **At capture start**, if nothing editable has focus, the HUD dot turns amber
+  and reads "⚠︎ no text field focused". Better to learn that before speaking for
+  a minute than after.
+- **At delivery**, the check runs again — focus can move while you talk — and if
+  there is still no target the text is held and a panel appears with a **Copy**
+  button. It stays until dismissed, because the case it exists for is finishing a
+  long dictation and only then noticing, which is exactly when you may have
+  looked away.
+
+Detection uses the accessibility tree, and it deliberately **fails open**: only a
+confident "not editable" holds text back. Browsers and Electron apps under-report
+editability, and wrongly withholding text from a field that would have taken it
+is worse than a paste that lands somewhere harmless. Either way the transcript
+stays in **Copy Last Transcript** and in `flowctl last`.
+
 ## Configuration
 
 `~/Library/Application Support/LocalFlow/config.json`, written on first run.

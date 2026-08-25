@@ -3,10 +3,11 @@ import AVFoundation
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
-    static let version = "0.4.0"
+    static let version = "0.5.0"
 
     private let recorder = AudioRecorder()
     private let hud = HUD()
+    private let recovery = RecoveryPanel()
     private var hotkey: HotkeyMonitor?
     private var statusItem: NSStatusItem?
 
@@ -16,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let daemonQueue = DispatchQueue(label: "com.cscmsg.localflow.daemon")
 
     private var recordingStart: Date?
+    private var noDestinationAtStart = false
     private var isLatched = false
     private var targetApp: String?
     private var hudTimer: Timer?
@@ -182,11 +184,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isLatched = latched
         recordingStart = Date()
 
-        hud.show(.recording(seconds: 0, latched: latched))
+        // Checked up front, not only at the end: the failure worth preventing is
+        // speaking for a minute and only then discovering there was no target.
+        noDestinationAtStart = TextDestination.shouldHoldBack
+        if noDestinationAtStart { Log.write("no editable field focused at capture start") }
+        recovery.hide()
+
+        hud.show(.recording(seconds: 0, latched: latched, noDestination: noDestinationAtStart))
         hudTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             guard let self, let start = self.recordingStart else { return }
             self.hud.show(.recording(seconds: Date().timeIntervalSince(start),
-                                     latched: self.isLatched))
+                                     latched: self.isLatched,
+                                     noDestination: self.noDestinationAtStart))
         }
         if latched { startLatchCap() }
     }
@@ -280,6 +289,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         lastTranscript = result.text
         rebuildMenu()
+
+        // Re-checked here rather than trusting the start-of-capture reading:
+        // focus can move while you speak, and this is the moment that decides
+        // whether the text survives.
+        if TextDestination.shouldHoldBack {
+            Log.write("held back \(result.text.count) chars — no editable field focused")
+            hud.hide()
+            recovery.show(result.text)
+            return
+        }
+
         Log.write("delivered \(result.text.count) chars "
                   + "(asr \(result.asrMilliseconds)ms, polish \(result.polishMilliseconds)ms, "
                   + "llm=\(result.usedLLM))")

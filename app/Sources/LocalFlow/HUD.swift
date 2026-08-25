@@ -7,7 +7,7 @@ import AppKit
 /// were typing into still being frontmost when the paste lands.
 final class HUD {
     enum State {
-        case recording(seconds: TimeInterval, latched: Bool)
+        case recording(seconds: TimeInterval, latched: Bool, noDestination: Bool)
         case thinking
         case done(String)
         case failed(String)
@@ -24,14 +24,19 @@ final class HUD {
         self.panel = panel
 
         switch state {
-        case .recording(let seconds, let latched):
-            indicator.layer?.backgroundColor = NSColor.systemRed.cgColor
+        case .recording(let seconds, let latched, let noDestination):
+            // Amber while there is nowhere for the text to land: better to
+            // learn that now than after speaking for a minute.
+            indicator.layer?.backgroundColor =
+                (noDestination ? NSColor.systemOrange : NSColor.systemRed).cgColor
             // A latched session keeps running with no key held, so the HUD has
             // to say so unmistakably -- otherwise a forgotten session records
             // in silence and the user has no idea it is still listening.
-            label.stringValue = latched
+            var line = latched
                 ? String(format: "Listening (latched)  %.1fs  ·  press again to stop", seconds)
                 : String(format: "Listening  %.1fs", seconds)
+            if noDestination { line += "  ·  ⚠︎ no text field focused" }
+            label.stringValue = line
 
         case .thinking:
             indicator.layer?.backgroundColor = NSColor.systemOrange.cgColor
