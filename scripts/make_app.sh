@@ -23,6 +23,15 @@ touch .dist/.metadata_never_index
 cp app/.build/release/LocalFlow "$APP/Contents/MacOS/LocalFlow"
 [ -f Assets/AppIcon.icns ] && cp Assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
+# Ship the daemon inside the bundle so a DMG install needs no repository
+# checkout. These are plain .py files -- no compiled code -- so they do not
+# complicate signing.
+mkdir -p "$APP/Contents/Resources/daemon"
+cp daemon/*.py daemon/requirements.txt "$APP/Contents/Resources/daemon/"
+cp scripts/setup.sh "$APP/Contents/Resources/setup.sh"
+chmod +x "$APP/Contents/Resources/setup.sh"
+cp LICENSE NOTICE "$APP/Contents/Resources/"
+
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

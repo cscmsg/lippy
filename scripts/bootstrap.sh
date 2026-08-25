@@ -2,6 +2,14 @@
 # Create the Python venv and pull down the models. Safe to re-run.
 set -euo pipefail
 
+# MLX is Metal and unified-memory based; there is no Intel path. Without this
+# check an Intel Mac fails deep inside a pip build with an unreadable error.
+if [ "$(uname -m)" != "arm64" ]; then
+  echo "LocalFlow requires an Apple Silicon Mac (M1 or later)." >&2
+  echo "This machine reports: $(uname -m)" >&2
+  exit 1
+fi
+
 VENV="${LOCALFLOW_VENV:-$HOME/.cache/localflow-venv}"
 PYTHON="${LOCALFLOW_PYTHON:-/opt/homebrew/bin/python3.12}"
 

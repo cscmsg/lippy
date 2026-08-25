@@ -69,12 +69,42 @@ anything that fails falls back to the deterministic rule-cleaned text:
 When a guard fires it is logged with the reason, so you can see which one caught
 it rather than guessing.
 
+## Requirements
+
+- **Apple Silicon Mac** (M1 or later). MLX is Metal and unified-memory based;
+  there is no Intel path, and both the installer and the daemon refuse to run
+  rather than failing obscurely.
+- **macOS 14** or later.
+- **Python 3.12 or newer** — Homebrew (`brew install python@3.12`) or
+  python.org. Only used to build a private environment under Application
+  Support; nothing is installed into your system Python.
+- **About 5 GB of disk** for the model weights, downloaded once.
+
 ## Install
+
+**From a release**
+
+1. Download the latest `LocalFlow-x.y.z.dmg` from
+   [Releases](https://github.com/cscmsg/localflow/releases) and drag the app to
+   Applications.
+2. Launch it, then choose **Run First-Time Setup…** from its menu bar item. That
+   builds the Python environment, downloads the models (~4.5 GB, once) and
+   installs the background service. It is safe to re-run.
+3. Grant the two permissions below.
+
+Or with Homebrew:
+
+```
+brew install --cask cscmsg/tap/localflow
+```
+
+**From source**
 
 ```
 make bootstrap        # venv + ~4.5 GB of model weights
 make install-daemon   # flowd as a LaunchAgent (survives reboot)
-make install          # build, sign, install to ~/Applications, launch
+make install          # build, sign, install to ~/Applications
+make dmg              # optional: build a distributable disk image
 ```
 
 Then grant two permissions — macOS will prompt, or set them by hand in

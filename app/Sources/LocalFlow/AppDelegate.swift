@@ -3,7 +3,7 @@ import AVFoundation
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
-    static let version = "0.7.0"
+    static let version = "0.8.0"
 
     private let recorder = AudioRecorder()
     private let hud = HUD()
@@ -434,6 +434,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         checkItem.target = self
         menu.addItem(checkItem)
 
+        let setupItem = NSMenuItem(title: "Run First-Time Setup…", action: #selector(runSetup),
+                                   keyEquivalent: "")
+        setupItem.target = self
+        menu.addItem(setupItem)
+
         let configItem = NSMenuItem(title: "Open Config File", action: #selector(openConfig), keyEquivalent: "")
         configItem.target = self
         menu.addItem(configItem)
@@ -505,6 +510,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.hud.show(alive ? .done("Daemon is ready") : .failed("Daemon is not running"))
             }
         }
+    }
+
+    /// Opens the bundled setup script in Terminal. It builds the Python
+    /// environment and downloads the models, which is what a DMG install still
+    /// needs before the daemon can start.
+    @objc private func runSetup() {
+        guard let resources = Bundle.main.resourcePath else { return }
+        let script = URL(fileURLWithPath: resources).appendingPathComponent("setup.sh")
+        let terminal = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+        NSWorkspace.shared.open([script], withApplicationAt: terminal,
+                                configuration: NSWorkspace.OpenConfiguration())
     }
 
     @objc private func openConfig() {

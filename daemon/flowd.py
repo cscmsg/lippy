@@ -17,6 +17,7 @@ import collections
 import logging
 import os
 import pathlib
+import platform
 import socket
 import socketserver
 import sys
@@ -161,6 +162,13 @@ class Server(socketserver.ThreadingUnixStreamServer):
 
 
 def main() -> int:
+    # MLX is Apple-Silicon only. Fail here with a sentence rather than deep
+    # inside a model load with a Metal error.
+    if platform.machine() != "arm64":
+        print(f"LocalFlow requires an Apple Silicon Mac; this is {platform.machine()}",
+              file=sys.stderr)
+        return 1
+
     parser = argparse.ArgumentParser(description="LocalFlow dictation daemon")
     parser.add_argument("--socket", type=pathlib.Path, default=None)
     parser.add_argument("--no-polish", action="store_true",

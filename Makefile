@@ -4,7 +4,7 @@ REPO := $(shell pwd)
 AGENT := com.cscmsg.localflow.flowd
 AGENT_PLIST := $(HOME)/Library/LaunchAgents/$(AGENT).plist
 
-.PHONY: bootstrap test app install daemon install-daemon uninstall-daemon status logs clean
+.PHONY: bootstrap test app dmg install daemon install-daemon uninstall-daemon status logs clean
 
 ## First-time setup: venv + model download (~4.5 GB).
 bootstrap:
@@ -15,6 +15,11 @@ test:
 
 app:
 	./scripts/make_app.sh
+
+## Distributable disk image. Signing/notarisation happen in CI, not here --
+## the production certificate deliberately does not live on this machine.
+dmg: app
+	./scripts/make_dmg.sh
 
 ## Replace the installed copy in ~/Applications and relaunch it.
 ## (~/Applications, not /Applications: the latter needs admin rights here.)

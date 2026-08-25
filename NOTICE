@@ -1,0 +1,43 @@
+LocalFlow
+Copyright (c) 2026 Courtney Cook
+Licensed under the MIT License (see LICENSE).
+
+LocalFlow does not redistribute any model weights. They are downloaded from
+Hugging Face on first run and stored in your own Hugging Face cache. The
+attributions below cover the models the software uses and the libraries it
+depends on.
+
+--------------------------------------------------------------------------------
+MODELS
+--------------------------------------------------------------------------------
+
+Parakeet TDT 0.6B v3  -  speech recognition
+    NVIDIA Corporation
+    https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
+    MLX conversion: https://huggingface.co/mlx-community/parakeet-tdt-0.6b-v3
+    Licensed under CC-BY-4.0 (https://creativecommons.org/licenses/by/4.0/).
+    Attribution is required by that licence and is given here.
+
+Qwen3-4B-Instruct-2507  -  transcript cleanup
+    Alibaba Cloud / Qwen team
+    https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507
+    MLX conversion: https://huggingface.co/mlx-community/Qwen3-4B-Instruct-2507-4bit
+    Licensed under Apache License 2.0.
+
+Whisper large-v3-turbo  -  optional fallback backend, not used by default
+    OpenAI
+    Licensed under Apache License 2.0 (weights and code).
+
+--------------------------------------------------------------------------------
+LIBRARIES
+--------------------------------------------------------------------------------
+
+parakeet-mlx      Apache-2.0    https://github.com/senstella/parakeet-mlx
+mlx               MIT           https://github.com/ml-explore/mlx
+mlx-lm            MIT           https://github.com/ml-explore/mlx-lm
+mlx-whisper       MIT           https://github.com/ml-explore/mlx-examples
+numpy             BSD-3-Clause  https://numpy.org
+soundfile         BSD-3-Clause  https://github.com/bastibe/python-soundfile
+
+Licences verified 2026-08-24 against PyPI metadata and the models' Hugging Face
+cards.
