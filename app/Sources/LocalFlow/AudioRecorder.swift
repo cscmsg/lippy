@@ -24,10 +24,6 @@ final class AudioRecorder {
     private var tapCallbacks = 0
     private var isRunning = false
 
-    func prepare() {
-        engine.prepare()
-    }
-
     static func requestPermission(_ completion: @escaping (Bool) -> Void) {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:

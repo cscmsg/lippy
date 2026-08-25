@@ -84,17 +84,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Log.write("accessibility \(AXIsProcessTrusted())")
         Log.write("mic status    \(Self.micStatusName())")
 
-        recorder.prepare()
+        // The hotkey goes in FIRST, before anything that touches audio.
+        //
+        // AppKit swallows an Objective-C exception thrown from this delegate
+        // method: the app keeps running, but the rest of the method never
+        // executes. With audio set up first, one throw from AVAudioEngine left
+        // the app alive with no event monitors installed and every key dead,
+        // which reads as "the app is broken" rather than "one call failed".
+        // Ordering it this way means an audio failure costs audio, not the
+        // entire interface.
+        installHotkey()
+        Log.write("hotkey installed")
+
+        if !HotkeyMonitor.hasAccessibilityPermission {
+            HotkeyMonitor.promptForAccessibility()
+        }
 
         AudioRecorder.requestPermission { granted in
             Log.write("requestAccess at launch: granted=\(granted), "
                       + "status now \(Self.micStatusName())")
         }
-
-        if !HotkeyMonitor.hasAccessibilityPermission {
-            HotkeyMonitor.promptForAccessibility()
-        }
-        installHotkey()
+        Log.write("launch sequence complete")
     }
 
     func applicationWillTerminate(_ notification: Notification) {
