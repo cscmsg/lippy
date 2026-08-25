@@ -34,6 +34,10 @@ class Config:
     asr_backend: str = "parakeet"
     asr_model: str | None = None
 
+    # Live preview in the HUD while you speak. Costs a little GPU during
+    # recording and changes nothing about the delivered text.
+    streaming_preview: bool = True
+
     polish_enabled: bool = True
     polish_model: str = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
 

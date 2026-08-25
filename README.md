@@ -26,8 +26,9 @@ launched from a venv does not.
 ```
 hold Right Option
    ↓  AVAudioEngine → 16 kHz mono Float32
-   ↓  unix socket (newline-delimited JSON, base64 PCM)
-   ↓  Parakeet TDT 0.6B v3          ~200ms   speech → text
+   ↓  unix socket (newline-delimited JSON, base64 PCM), 0.5s chunks
+   ↓  Parakeet streaming decoder            live preview in the HUD
+   ↓  Parakeet TDT 0.6B v3          ~200ms   speech → text (full context)
    ↓  deterministic rules             <1ms   fillers, stutters, dictionary
    ↓  Qwen3-4B-Instruct              ~900ms  punctuation, grammar, false starts
    ↓  guardrails                            reject or accept the model's work
@@ -46,6 +47,32 @@ transcribe to `""`.
 
 Parakeet TDT 0.6B v3 — NVIDIA, CC-BY-4.0, 25 languages, 2.51 GB, ~1.9% WER on
 LibriSpeech clean, and ~40× realtime on an M4 Pro.
+
+### Why the preview never becomes the output
+
+Audio streams to the daemon in 0.5s chunks while you speak, and a Parakeet
+streaming decoder turns them into the running text in the HUD. That preview is
+cosmetic. The text delivered at your cursor comes from a second, full-context
+pass over the whole utterance once you stop.
+
+That is not caution for its own sake — it is measurable. On the same recording:
+
+```
+last partial : "So why I think we should ship the Lex Cloak update..."
+final        : "So I think we should ship the Lex Cloak update..."
+```
+
+A streaming decoder sees a limited window, so it commits early to words whose
+disambiguation arrives later in the sentence. Showing you a preview is not worth
+degrading what actually lands in your message.
+
+Chunks are 0.5s because the streaming decoder takes ~220ms to ingest 1s of
+audio. Sending every ~85ms tap buffer makes per-chunk overhead dominate and the
+preview falls behind realtime; half a second stays well ahead and still updates
+twice a second. If the preview fails for any reason the daemon drops it and
+keeps recording — losing the words someone is mid-sentence through to salvage a
+HUD animation would be a poor trade. Turn it off with
+`"streaming_preview": false`.
 
 ### Why the LLM pass is on a leash
 
@@ -184,9 +211,6 @@ Scoped out of v1 deliberately:
 
 - **Per-app tone** — the frontmost app name is already captured and passed to the
   daemon as `app_hint`; nothing varies the prompt on it yet.
-- **Streaming transcription** — Parakeet's `transcribe_stream` would let the HUD
-  show words as you speak. Currently transcription starts on release. This
-  matters more now that latched sessions can run long.
 - **Learned dictionary** — corrections are hand-added to `config.json`.
 
 ## Declined

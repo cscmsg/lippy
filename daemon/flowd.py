@@ -60,6 +60,33 @@ class Engine:
             self.polisher.warm_up()
         log.info("engine ready")
 
+    def open_stream(self):
+        """Begin a live-preview session, or None if previews are unavailable.
+
+        The session spans many socket messages, so __enter__/__exit__ are driven
+        by hand rather than with a `with` block.
+        """
+        if not self.cfg.streaming_preview:
+            return None
+        if not getattr(self.asr, "supports_streaming", False):
+            return None
+        with self.lock:
+            session = self.asr.stream()
+            session.__enter__()
+            return session
+
+    def feed(self, session, pcm: np.ndarray) -> str:
+        import mlx.core as mx
+        with self.lock:
+            session.add_audio(mx.array(pcm))
+            return session.result.text.strip()
+
+    def close_stream(self, session) -> None:
+        if session is None:
+            return
+        with self.lock:
+            session.__exit__(None, None, None)
+
     def process(self, pcm: np.ndarray, mode: str, app: str | None) -> dict:
         with self.lock:
             transcript = self.asr.transcribe(pcm)
@@ -101,6 +128,7 @@ class Handler(socketserver.StreamRequestHandler):
         engine: Engine = self.server.engine
         chunks: list[np.ndarray] = []
         mode, app, recording = "polish", None, False
+        stream = None
 
         try:
             for message in protocol.messages(self.request):
@@ -110,17 +138,37 @@ class Handler(socketserver.StreamRequestHandler):
                     chunks, recording = [], True
                     mode = message.get("mode", "polish")
                     app = message.get("app")
+                    stream = engine.open_stream()
                     protocol.send(self.request, {"type": "ready"})
 
                 elif kind == "audio":
                     if recording:
-                        chunks.append(protocol.decode_pcm(message["pcm"]))
+                        pcm = protocol.decode_pcm(message["pcm"])
+                        chunks.append(pcm)
+                        if stream is not None:
+                            # The preview is a convenience. If it fails, drop it
+                            # and keep recording -- losing the words someone is
+                            # in the middle of saying to salvage a HUD animation
+                            # would be a poor trade.
+                            try:
+                                partial = engine.feed(stream, pcm)
+                                if partial:
+                                    protocol.send(self.request,
+                                                  {"type": "partial", "text": partial})
+                            except Exception:
+                                log.exception("streaming preview failed; continuing without it")
+                                engine.close_stream(stream)
+                                stream = None
 
                 elif kind == "cancel":
+                    engine.close_stream(stream)
+                    stream = None
                     chunks, recording = [], False
 
                 elif kind == "stop":
                     recording = False
+                    engine.close_stream(stream)
+                    stream = None
                     pcm = np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.float32)
                     chunks = []
                     protocol.send(self.request, engine.process(pcm, mode, app))
@@ -149,6 +197,12 @@ class Handler(socketserver.StreamRequestHandler):
                 protocol.send(self.request, {"type": "error", "message": str(exc)})
             except OSError:
                 pass
+        finally:
+            # A dropped connection must not leak the session's decoder state.
+            try:
+                engine.close_stream(stream)
+            except Exception:
+                log.exception("failed to close streaming session")
 
 
 class Server(socketserver.ThreadingUnixStreamServer):

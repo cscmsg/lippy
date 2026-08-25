@@ -135,17 +135,49 @@ final class DaemonClient {
         try send(["type": "audio", "pcm": pcm.base64EncodedString()])
     }
 
-    func finish() throws -> Result {
+    /// Asks the daemon to transcribe what it has. The result arrives on the
+    /// reader thread, not from this call.
+    func requestStop() throws {
         try send(["type": "stop"])
-        let response = try receive()
-        return Result(
-            text: response["text"] as? String ?? "",
-            raw: response["raw"] as? String ?? "",
-            asrMilliseconds: response["asr_ms"] as? Int ?? 0,
-            polishMilliseconds: response["polish_ms"] as? Int ?? 0,
-            usedLLM: response["used_llm"] as? Bool ?? false,
-            fallbackReason: response["fallback_reason"] as? String ?? ""
-        )
+    }
+
+    /// Reads messages until the final result, on a thread of its own.
+    ///
+    /// Live-preview partials arrive *while* audio is still being written, so
+    /// reading cannot wait until the end. A dedicated reader also keeps the
+    /// blocking `receive()` off the queue doing the writing -- POSIX sockets
+    /// allow a concurrent reader and writer on one descriptor, provided each
+    /// side is serialised with itself, which it is here.
+    func startReader(onPartial: @escaping (String) -> Void,
+                     onResult: @escaping (Swift.Result<Result, Error>) -> Void) {
+        let thread = Thread { [weak self] in
+            guard let self else { return }
+            do {
+                while true {
+                    let message = try self.receive()
+                    switch message["type"] as? String {
+                    case "partial":
+                        onPartial(message["text"] as? String ?? "")
+                    case "result":
+                        onResult(.success(Result(
+                            text: message["text"] as? String ?? "",
+                            raw: message["raw"] as? String ?? "",
+                            asrMilliseconds: message["asr_ms"] as? Int ?? 0,
+                            polishMilliseconds: message["polish_ms"] as? Int ?? 0,
+                            usedLLM: message["used_llm"] as? Bool ?? false,
+                            fallbackReason: message["fallback_reason"] as? String ?? ""
+                        )))
+                        return
+                    default:
+                        continue
+                    }
+                }
+            } catch {
+                onResult(.failure(error))
+            }
+        }
+        thread.name = "com.cscmsg.localflow.reader"
+        thread.start()
     }
 
     func cancel() {

@@ -40,10 +40,29 @@ enum SelfTest {
             for chunk in stride(from: 0, to: samples.count, by: 16_000) {
                 try client.sendAudio(Array(samples[chunk..<min(chunk + 16_000, samples.count)]))
             }
-            let result = try client.finish()
+            // The result arrives on the reader thread, so wait for it here.
+            var outcome: Swift.Result<DaemonClient.Result, Error>?
+            var partials = 0
+            let done = DispatchSemaphore(value: 0)
+            client.startReader(
+                onPartial: { _ in partials += 1 },
+                onResult: { outcome = $0; done.signal() })
+            try client.requestStop()
+
+            guard done.wait(timeout: .now() + 120) == .success else {
+                print("FAILED: daemon did not answer within 120s")
+                return 1
+            }
+            let result: DaemonClient.Result
+            switch outcome {
+            case .success(let value): result = value
+            case .failure(let error): print("FAILED: \(error.localizedDescription)"); return 1
+            case nil: print("FAILED: no result"); return 1
+            }
             let elapsed = Int(Date().timeIntervalSince(started) * 1000)
 
             print("round trip  \(elapsed)ms  (asr \(result.asrMilliseconds)ms, polish \(result.polishMilliseconds)ms)")
+            print("previews    \(partials) streamed partials")
             print("used LLM    \(result.usedLLM)\(result.fallbackReason.isEmpty ? "" : "  (\(result.fallbackReason))")")
             print("raw         \(result.raw.isEmpty ? "<empty>" : result.raw)")
             print("final       \(result.text.isEmpty ? "<empty>" : result.text)")

@@ -7,7 +7,7 @@ import AppKit
 /// were typing into still being frontmost when the paste lands.
 final class HUD {
     enum State {
-        case recording(seconds: TimeInterval, latched: Bool)
+        case recording(seconds: TimeInterval, latched: Bool, partial: String)
         case thinking
         case done(String)
         case failed(String)
@@ -24,14 +24,19 @@ final class HUD {
         self.panel = panel
 
         switch state {
-        case .recording(let seconds, let latched):
+        case .recording(let seconds, let latched, let partial):
             indicator.layer?.backgroundColor = NSColor.systemRed.cgColor
             // A latched session keeps running with no key held, so the HUD has
             // to say so unmistakably -- otherwise a forgotten session records
             // in silence and the user has no idea it is still listening.
-            label.stringValue = latched
-                ? String(format: "Listening (latched)  %.1fs  ·  press again to stop", seconds)
+            let state = latched
+                ? String(format: "Listening (latched)  %.1fs", seconds)
                 : String(format: "Listening  %.1fs", seconds)
+            if partial.isEmpty {
+                label.stringValue = latched ? state + "  ·  press again to stop" : state
+            } else {
+                label.stringValue = state + "  ·  " + Self.trailing(of: partial)
+            }
         case .thinking:
             indicator.layer?.backgroundColor = NSColor.systemOrange.cgColor
             label.stringValue = "Polishing…"
@@ -59,6 +64,13 @@ final class HUD {
         let work = DispatchWorkItem { [weak self] in self?.panel?.orderOut(nil) }
         hideWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// Keeps the end of the preview, which is where the words you just said
+    /// are. Growing the panel without bound would march it off the screen.
+    private static func trailing(of text: String, limit: Int = 72) -> String {
+        guard text.count > limit else { return text }
+        return "…" + String(text.suffix(limit))
     }
 
     private func makePanel() -> NSPanel {
@@ -113,7 +125,7 @@ final class HUD {
     /// dictating into, which is usually near the middle of the screen.
     private func resize(_ panel: NSPanel) {
         guard let screen = NSScreen.main else { return }
-        let width = min(max(label.frame.width + 60, 200), 520)
+        let width = min(max(label.frame.width + 60, 200), 760)
         let frame = NSRect(
             x: screen.visibleFrame.midX - width / 2,
             y: screen.visibleFrame.minY + 90,
