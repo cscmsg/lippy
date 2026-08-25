@@ -1,10 +1,10 @@
 # Lippy
 
-A local replacement for Wispr Flow. Hold a key, talk, release — cleaned text
-appears at your cursor in whatever app has focus.
+Speak up instead of typing. Hold a key, talk, let go, and clean text appears at
+your cursor in whatever app you are using.
 
-Nothing leaves the machine. No subscription, no account, no audio uploaded to
-anyone's servers.
+Everything runs on your Mac. The audio stays on your machine, there is no
+account, and there is nothing to subscribe to.
 
 ## How it works
 
@@ -17,9 +17,9 @@ Two pieces, on purpose:
 
 They are split because loading Parakeet plus a 4B LLM takes ~25 seconds. Keeping
 them warm in a daemon turns that into ~1.1s per utterance. The app is native
-because macOS binds Accessibility and Microphone grants to a code signature —
-a signed `.app` keeps its permissions across rebuilds, and a Python process
-launched from a venv does not.
+because macOS binds Accessibility and Microphone grants to a code signature. A
+signed `.app` keeps its permissions across rebuilds. A Python process launched
+from a venv does not.
 
 ### The pipeline
 
@@ -44,40 +44,40 @@ trailing edges of a push-to-talk recording contain. Parakeet returns an empty
 string instead. Measured here: a 440 Hz tone and 2s of digital silence both
 transcribe to `""`.
 
-Parakeet TDT 0.6B v3 — NVIDIA, CC-BY-4.0, 25 languages, 2.51 GB, ~1.9% WER on
+Parakeet TDT 0.6B v3, NVIDIA, CC-BY-4.0, 25 languages, 2.51 GB, ~1.9% WER on
 LibriSpeech clean, and ~40× realtime on an M4 Pro.
 
 ### Why the LLM pass is on a leash
 
 A small instruct model told to "clean this up" will sometimes answer the
 question you dictated, summarise a long passage, or quietly drop a clause. Those
-failures are fluent and plausible — you notice when the message you already sent
+failures are fluent and plausible. You notice when the message you already sent
 says something you did not say.
 
 So the model's output is a *proposal*. Four guards run before it is used, and
 anything that fails falls back to the deterministic rule-cleaned text:
 
-1. **Length** — grew >1.3× (added content) or shrank <0.55× (summarised).
-2. **Content retention** — <70% of input content words survived. Apostrophe-blind,
+1. **Length**: grew >1.3× (added content) or shrank <0.55× (summarised).
+2. **Content retention**: <70% of input content words survived. Apostrophe-blind,
    because restoring `whats` → `what's` is the job, not a lost word.
-3. **Interrogative** — a dictated question that came back as a statement. This
+3. **Interrogative**: a dictated question that came back as a statement. This
    catches the dangerous near-miss the first two guards miss: *"what is the
    capital of france"* → *"The capital of France is Paris."* is the same length
    and keeps every content word, and is still an answer rather than a cleanup.
-4. **Meta-commentary** — the model describing the task instead of doing it.
+4. **Meta-commentary**: the model describing the task instead of doing it.
 
 When a guard fires it is logged with the reason, so you can see which one caught
 it rather than guessing.
 
 ## Requirements
 
-- **Apple Silicon Mac** (M1 or later). MLX is Metal and unified-memory based;
-  there is no Intel path, and both the installer and the daemon refuse to run
-  rather than failing obscurely.
+- **Apple Silicon Mac** (M1 or later). MLX is Metal and unified-memory based, so
+  there is no Intel path. Both the installer and the daemon refuse to run rather
+  than failing obscurely.
 - **macOS 14** or later.
-- **Python 3.12 or newer** — Homebrew (`brew install python@3.12`) or
+- **Python 3.12 or newer**: Homebrew (`brew install python@3.12`) or
   python.org. Only used to build a private environment under Application
-  Support; nothing is installed into your system Python.
+  Support. Nothing is installed into your system Python.
 - **About 5 GB of disk** for the model weights, downloaded once.
 
 ## Install
@@ -107,11 +107,11 @@ make install          # build, sign, install to ~/Applications
 make dmg              # optional: build a distributable disk image
 ```
 
-Then grant two permissions — macOS will prompt, or set them by hand in
-**System Settings → Privacy & Security**:
+Then grant two permissions. macOS will prompt, or you can set them by hand in
+**System Settings → Privacy and Security**:
 
-- **Microphone** — to hear you.
-- **Accessibility** — to see the hotkey and to paste. Without it macOS silently
+- **Microphone**: to hear you.
+- **Accessibility**: to see the hotkey and to paste. Without it macOS silently
   delivers no global key events, so the app looks broken rather than blocked.
 
 Confirm it is alive:
@@ -132,25 +132,25 @@ Two ways to capture:
 Pressing the chord necessarily involves pressing the primary key, so press order
 is handled explicitly. With Shift already down, capture starts latched. Adding
 Shift *mid-hold* promotes the recording already in progress and keeps the audio
-so far — so either order works, and you can decide a sentence in that this one is
+so far, so either order works, and you can decide a sentence in that this one is
 going long.
 
 - Holding under 0.3s is a fumbled keypress and is ignored. This does not apply to
   a latched session, which is deliberate however briefly it ran.
-- Pressing any other key mid-hold cancels — that was a chord, not dictation. A
-  latched session is not cancelled this way; you may well type during one.
+- Pressing any other key mid-hold cancels, because that was a chord, not dictation. A
+  latched session is not cancelled this way, because you may well type during one.
 - A latched session stops itself after 5 minutes, so a forgotten one does not
-  record the room indefinitely. The HUD says "latched" the whole time.
+  record the room for hours. The HUD says "latched" the whole time.
 - Both keys are rebindable in the menu, and the same key cannot be bound to both
-  (a press would be ambiguous). **Already taken on this machine:** Fn is Wispr
-  Flow's trigger, and Right Control double-tap is a Claude desktop shortcut.
+  (a press would be ambiguous). Check your own machine before rebinding: other
+  apps commonly claim Fn and a Right Control double-tap.
 - The menu bar toggles **Polished** vs **Verbatim** (rules only, ~200ms, no LLM),
   and rebinds the key (Right/Left Option, Right Command, Right Control, Right
   Shift, Fn).
 - **Copy Last Transcript** recovers text if a paste went somewhere unexpected.
 - **Start at Login** registers the app as a login item (`SMAppService`), so
   dictation is available the moment you log in. The daemon already starts on its
-  own — it is a LaunchAgent with `RunAtLoad` — so this is the missing half. The
+  own (it is a LaunchAgent with `RunAtLoad`) so this is the missing half. The
   system is the source of truth, not a preference: if you switch it off in
   System Settings the menu says so rather than showing a tick for something that
   is disabled.
@@ -158,7 +158,7 @@ going long.
   output device for the duration of the recording and restores it afterwards.
   Music, a video or a call playing through speakers bleeds into the microphone
   and contaminates the transcript. It is opt-in because muting the machine is a
-  side effect that should be asked for — sometimes you dictate a note while
+  side effect that should be asked for. Sometimes you dictate a note while
   deliberately listening to something. If the output was already muted, it is
   left alone rather than helpfully unmuted afterwards. Devices with no mute
   control (HDMI, some external DACs) fall back to zeroing per-channel volume.
@@ -172,7 +172,7 @@ page, nothing happens and the words are gone. Two guards:
 - **At capture start**, if nothing editable has focus, the HUD dot turns amber
   and reads "⚠︎ no text field focused". Better to learn that before speaking for
   a minute than after.
-- **At delivery**, the check runs again — focus can move while you talk — and if
+- **At delivery**, the check runs again (focus can move while you talk) and if
   there is still no target the text is held and a panel appears with a **Copy**
   button. It stays until dismissed, because the case it exists for is finishing a
   long dictation and only then noticing, which is exactly when you may have
@@ -198,12 +198,12 @@ stays in **Copy Last Transcript** and in `lippyctl last`.
 }
 ```
 
-- **`dictionary`** — proper nouns the ASR has never seen. Case-insensitive,
+- **`dictionary`**: proper nouns the ASR has never seen. Case-insensitive,
   word-boundary matched. The place to add names, acronyms and jargon as you hit them.
-- **`aggressive_fillers`** — off by default. On, it also strips *like*, *you know*,
+- **`aggressive_fillers`**: off by default. On, it also strips *like*, *you know*,
   *I mean*, *basically*, *actually*. These are content often enough that removing
   them is an edit, not a cleanup, which is why you have to ask for it.
-- **`cleanup_level`** — how hard to work. Measured on the same 10s recording:
+- **`cleanup_level`**: how hard to work. Measured on the same 10s recording:
 
   | Level | Round trip | What it does |
   |---|---|---|
@@ -213,7 +213,7 @@ stays in **Copy Last Transcript** and in `lippyctl last`.
   | `polish` | 1057ms | + an LLM pass over the result |
 
   Only `polish` needs a language model. Everything below it is deterministic
-  regex — sub-millisecond, and it ports to any platform as plain logic. On that
+  regex, sub-millisecond, and it ports to any platform as plain logic. On that
   sample the LLM's whole contribution was joining one sentence fragment, which
   is why `clean` is the right default anywhere a 4B model is a stretch.
 
@@ -222,7 +222,7 @@ Restart the daemon after editing: `launchctl kickstart -k gui/$(id -u)/com.cscms
 ## Privacy
 
 - The socket is `0600` in your Application Support directory. No TCP port is opened.
-- Audio is never written to disk — it goes from the mic through memory to the model.
+- Audio is never written to disk. It goes from the mic through memory to the model.
 - Transcripts are held in daemon **memory** only (last 20, for `lippyctl last`).
   Nothing is logged to disk on purpose: dictation is the most sensitive text on
   the machine, and a plaintext log of it is a liability a local-first tool has no
@@ -241,7 +241,7 @@ $VENV/bin/python daemon/lippyctl.py last              # recent utterances
 ```
 
 `lippyctl file` prints raw ASR and final text separately, plus which guard fired
-if the polish pass fell back — that separation is usually enough to tell whether
+if the polish pass fell back. That separation is usually enough to tell whether
 a bad result came from mishearing or from over-editing.
 
 ## Releasing
@@ -256,7 +256,7 @@ That needs six repository secrets. `./scripts/set-release-secrets.sh <owner/repo
 sets them: values go from your keychain export and password manager straight
 into `gh`, piped rather than passed as arguments, so they never reach your shell
 history or the process list. Without them the workflow still builds, but ad-hoc
-signs — Gatekeeper rejects the result, so it is not distributable.
+signs, Gatekeeper rejects the result, so it is not distributable.
 
 For local builds, `make_app.sh` will not guess between multiple signing
 identities: order in `security find-identity` is not meaningful, and picking the
@@ -282,13 +282,13 @@ model has actually been observed to ruin a dictated message.
 
 Scoped out of v1 deliberately:
 
-- **Per-app tone** — the frontmost app name is already captured and passed to the
-  daemon as `app_hint`; nothing varies the prompt on it yet.
-- **Learned dictionary** — corrections are hand-added to `config.json`.
+- **Per-app tone**: the frontmost app name is already captured and passed to the
+  daemon as `app_hint`, and nothing varies the prompt on it yet.
+- **Learned dictionary**: corrections are hand-added to `config.json`.
 
 ## Declined
 
-**Live transcription preview** (words appearing in the HUD as you speak) — built
+**Live transcription preview** (words appearing in the HUD as you speak), built
 in v0.3.0, removed in v0.4.0 after use. It was not a rendering problem that
 could be polished away.
 
@@ -298,16 +298,16 @@ still moving. Same mechanism that made a partial read *"So why I think"* where
 the full pass read *"So I think"*. Making it flow like subtitles would require
 holding back unstable text, which adds latency to a preview whose whole value
 was immediacy. It is also unreadable while speaking, which is the only time it
-is on screen. Wispr Flow does not show midway text either.
+is on screen.
 
-**Command mode** (select text, hold the key, say *"make this shorter"*) — decided
-against on 2026-08-24, not deferred. The operator never used it in Wispr Flow and
-prefers to reword deliberately, by hand or with tools better suited to it.
+**Command mode** (select text, hold the key, say *"make this shorter"*), decided
+against, not deferred. Rewording is something better done deliberately, by hand
+or with a tool suited to it.
 
-Worth recording because it is not a small omission and will look like one: it is
-a headline Wispr Flow Pro feature, and the pieces to build it are mostly already
-here. It also cuts against this tool's design. Every guardrail in `polish.py`
-enforces *never act on the content, never change meaning* — which is why text can
+Worth recording because it is not a small omission and will look like one: paid
+dictation tools treat it as a headline feature, and the pieces to build it are
+mostly already here. It also cuts against this tool's design. Every guardrail in `polish.py`
+enforces *never act on the content, never change meaning*, which is why text can
 appear at your cursor without proofreading. Command mode requires the opposite
 ("make this concise" is a summarisation request that trips the length guard by
 design), so it would need a second pipeline with much weaker guards, and it
@@ -317,5 +317,5 @@ overwrites text you already wrote rather than filling an empty cursor.
 
 - `parakeet-mlx` 0.5.2 (PyPI, 2026-06-05), Apache-2.0
 - `mlx-lm` 0.31.3 (PyPI, 2026-04-22)
-- `mlx-community/parakeet-tdt-0.6b-v3` — CC-BY-4.0, 2.51 GB, 25 languages
+- `mlx-community/parakeet-tdt-0.6b-v3`, CC-BY-4.0, 2.51 GB, 25 languages
 - Built and run on macOS 26.5.1, Xcode 26.6, M4 Pro / 64 GB, 2026-08-24
