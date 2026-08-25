@@ -21,7 +21,9 @@ mkdir -p .dist "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # paths, and this marker makes the exclusion explicit for anything that does not.
 touch .dist/.metadata_never_index
 cp app/.build/release/LocalFlow "$APP/Contents/MacOS/LocalFlow"
-[ -f Assets/AppIcon.icns ] && cp Assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+if [ -f Assets/AppIcon.icns ]; then
+  cp Assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+fi
 
 # Ship the daemon inside the bundle so a DMG install needs no repository
 # checkout. These are plain .py files -- no compiled code -- so they do not
@@ -72,8 +74,13 @@ PLIST
 # Sign by certificate hash, not name: this keychain holds two identically-named
 # "Developer ID Application: Courtney Cook" certs, and signing by name fails as
 # ambiguous.
+# The trailing `|| true` is load-bearing under `set -o pipefail`: with no
+# signing certificate installed, grep exits 1, pipefail propagates it, and the
+# command substitution aborts the whole script -- silently, right after the
+# build succeeds. That made the ad-hoc fallback below unreachable on exactly
+# the machines it exists for, including CI runners.
 IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
-  | grep -E '"(Developer ID Application|Apple Development)' | head -1 | awk '{print $2}')}"
+  | grep -E '"(Developer ID Application|Apple Development)' | head -1 | awk '{print $2}' || true)}"
 
 # --entitlements is not optional here: with --options runtime and no
 # entitlements file, the hardened runtime silently blocks the microphone.
