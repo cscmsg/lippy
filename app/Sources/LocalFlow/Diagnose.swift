@@ -10,6 +10,10 @@ import AppKit
 enum Diagnose {
 
     static func run() -> Int32 {
+        // Line-buffer stdout: piped to a file this is fully buffered by default,
+        // so a crash mid-diagnosis discards every line already "printed" and the
+        // tool reports nothing at all about where it got to.
+        setvbuf(stdout, nil, _IOLBF, 0)
         var healthy = true
 
         func report(_ label: String, _ ok: Bool, _ detail: String) {
@@ -39,7 +43,11 @@ enum Diagnose {
         // terminal has no Info.plist to raise one from -- so it hangs forever
         // instead of reporting anything. A diagnostic must never block.
         if mic == .authorized {
-            let inputFormat = AVAudioEngine().inputNode.outputFormat(forBus: 0)
+            // The engine must be held in a variable. `AVAudioEngine().inputNode`
+            // releases the engine at the end of the expression while the node it
+            // owns is still in use -- a use-after-free that segfaults here.
+            let engine = AVAudioEngine()
+            let inputFormat = engine.inputNode.outputFormat(forBus: 0)
             report("Input device", inputFormat.sampleRate > 0,
                    inputFormat.sampleRate > 0
                        ? "\(Int(inputFormat.sampleRate)) Hz, \(inputFormat.channelCount) ch"
