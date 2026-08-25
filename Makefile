@@ -22,7 +22,14 @@ install: app
 	pkill -x LocalFlow 2>/dev/null || true
 	mkdir -p $(HOME)/Applications
 	rm -rf $(HOME)/Applications/LocalFlow.app
-	ditto build/LocalFlow.app $(HOME)/Applications/LocalFlow.app
+	ditto .dist/LocalFlow.app $(HOME)/Applications/LocalFlow.app
+	@# Delete the staging copy. Excluding it from Spotlight is not enough --
+	@# dot-directories ARE indexed (verified with mdfind), and a marker file only
+	@# affects future indexing, not an entry already held. Two identical bundles
+	@# with the same name and bundle id are indistinguishable in Spotlight
+	@# results, and the staging one goes stale the moment you install without
+	@# rebuilding. The only reliable fix is for it not to exist.
+	rm -rf .dist
 	@echo ""
 	@echo "Installed. Launch it from Finder or Spotlight -- NOT from a terminal."
 	@echo "macOS evaluates microphone access against the process responsible for"
@@ -54,4 +61,4 @@ logs:
 	@tail -f "$(HOME)/Library/Application Support/LocalFlow/flowd.log"
 
 clean:
-	rm -rf app/.build build
+	rm -rf app/.build build .dist
