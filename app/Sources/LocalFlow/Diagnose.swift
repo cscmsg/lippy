@@ -21,7 +21,18 @@ enum Diagnose {
             if !ok { healthy = false }
         }
 
+        // TCC answers about the *responsible* process, which for a binary run
+        // from a shell is the terminal, not this app. Run that way, the
+        // microphone line reports the terminal's access and can read "granted"
+        // while the real app is denied. Launched by LaunchServices the parent
+        // is launchd, and the answer is about LocalFlow itself.
+        let guiLaunched = getppid() == 1
         print("LocalFlow \(AppDelegate.version)\n")
+        if !guiLaunched {
+            print("  ⚠︎  Run from a shell — the Microphone line below describes the")
+            print("      launching process, not LocalFlow. Use the app's menu bar")
+            print("      item for the truth about its own permissions.\n")
+        }
 
         let trusted = AXIsProcessTrusted()
         report("Accessibility", trusted,

@@ -23,7 +23,12 @@ install: app
 	mkdir -p $(HOME)/Applications
 	rm -rf $(HOME)/Applications/LocalFlow.app
 	ditto build/LocalFlow.app $(HOME)/Applications/LocalFlow.app
-	open $(HOME)/Applications/LocalFlow.app
+	@echo ""
+	@echo "Installed. Launch it from Finder or Spotlight -- NOT from a terminal."
+	@echo "macOS evaluates microphone access against the process responsible for"
+	@echo "the launch. Started from a shell, LocalFlow inherits that shell's"
+	@echo "responsibility and the request is denied with no prompt and no entry"
+	@echo "in System Settings, which looks like a broken app."
 
 ## Run the daemon in the foreground -- the way to watch what it is doing.
 daemon:
