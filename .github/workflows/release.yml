@@ -68,6 +68,18 @@ jobs:
       - name: Build the disk image
         run: ./scripts/make_dmg.sh
 
+      - name: Sign the disk image
+        if: env.APPLE_DEVELOPER_CERT_P12 != ''
+        run: |
+          set -euo pipefail
+          DMG="$(ls .dist/LocalFlow-*.dmg)"
+          # The image needs its own signature, not just the app inside it.
+          # Notarisation succeeds either way, but Gatekeeper's check on the
+          # downloaded .dmg reports "no usable signature" without this, which is
+          # what a user sees before they ever open it.
+          codesign --force --sign "$APPLE_DEVELOPER_ID_NAME" --timestamp "$DMG"
+          codesign --verify --verbose=2 "$DMG"
+
       - name: Notarise and staple
         if: env.APPLE_API_KEY_P8 != ''
         run: |
@@ -85,8 +97,17 @@ jobs:
           # Staple the ticket into the image so first launch works offline.
           xcrun stapler staple "$DMG"
           xcrun stapler validate "$DMG"
-          # Gatekeeper's own verdict, which is stricter than codesign's.
+          # Gatekeeper's own verdict on the image a user downloads. This is
+          # the check that failed the first signed run: it needs the image
+          # signed, which the step above now does.
           spctl -a -vvv -t open --context context:primary-signature "$DMG"
+
+          # And the verdict on the app itself, which is what actually launches.
+          MNT="$(mktemp -d)"
+          hdiutil attach "$DMG" -nobrowse -quiet -mountpoint "$MNT"
+          spctl -a -vv "$MNT/LocalFlow.app"
+          codesign --verify --deep --strict --verbose=2 "$MNT/LocalFlow.app"
+          hdiutil detach "$MNT" -quiet
 
       - name: Checksums
         run: |
