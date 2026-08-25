@@ -93,9 +93,27 @@ make status                                    # daemon + loaded models
 
 ## Use
 
-- **Hold Right Option**, speak, release. Text lands at your cursor.
-- Holding under 0.3s is treated as a fumbled keypress and ignored.
-- Pressing any other key mid-hold cancels — that was a modifier chord, not dictation.
+Two ways to capture:
+
+- **Hold Right Option**, speak, release. Push-to-talk, for a sentence or two.
+- **Right Option + Right Shift** latches: recording continues with no key held,
+  until you press Right Option again. For dictation too long to hold a key for.
+
+Pressing the chord necessarily involves pressing the primary key, so press order
+is handled explicitly. With Shift already down, capture starts latched. Adding
+Shift *mid-hold* promotes the recording already in progress and keeps the audio
+so far — so either order works, and you can decide a sentence in that this one is
+going long.
+
+- Holding under 0.3s is a fumbled keypress and is ignored. This does not apply to
+  a latched session, which is deliberate however briefly it ran.
+- Pressing any other key mid-hold cancels — that was a chord, not dictation. A
+  latched session is not cancelled this way; you may well type during one.
+- A latched session stops itself after 5 minutes, so a forgotten one does not
+  record the room indefinitely. The HUD says "latched" the whole time.
+- Both keys are rebindable in the menu, and the same key cannot be bound to both
+  (a press would be ambiguous). **Already taken on this machine:** Fn is Wispr
+  Flow's trigger, and Right Control double-tap is a Claude desktop shortcut.
 - The menu bar toggles **Polished** vs **Verbatim** (rules only, ~200ms, no LLM),
   and rebinds the key (Right/Left Option, Right Command, Right Control, Right
   Shift, Fn).
@@ -167,7 +185,8 @@ Scoped out of v1 deliberately:
 - **Per-app tone** — the frontmost app name is already captured and passed to the
   daemon as `app_hint`; nothing varies the prompt on it yet.
 - **Streaming transcription** — Parakeet's `transcribe_stream` would let the HUD
-  show words as you speak. Currently transcription starts on release.
+  show words as you speak. Currently transcription starts on release. This
+  matters more now that latched sessions can run long.
 - **Learned dictionary** — corrections are hand-added to `config.json`.
 
 ## Declined

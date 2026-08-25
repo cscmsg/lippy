@@ -3,7 +3,7 @@ import AVFoundation
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
-    static let version = "0.1.0"
+    static let version = "0.2.0"
 
     private let recorder = AudioRecorder()
     private let hud = HUD()
@@ -16,12 +16,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let daemonQueue = DispatchQueue(label: "com.cscmsg.localflow.daemon")
 
     private var recordingStart: Date?
+    private var isLatched = false
     private var targetApp: String?
     private var hudTimer: Timer?
+    private var latchCapTimer: Timer?
     private var lastTranscript = ""
 
-    /// Holds shorter than this are a fumbled keypress, not a dictation.
+    /// Holds shorter than this are a fumbled keypress. Applies to holds only:
+    /// a latched session is deliberate however briefly it ran.
     private let minimumHold: TimeInterval = 0.3
+
+    /// A latched session with no key held can be forgotten. Stop it rather than
+    /// record the room indefinitely.
+    private let latchCap: TimeInterval = 5 * 60
 
     private var socketPath: String {
         (NSHomeDirectory() as NSString)
@@ -42,6 +49,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: "hotkey")
+            // Never let one key mean two things.
+            if latchChoice == newValue { latchChoice = nil }
+            installHotkey()
+            rebuildMenu()
+        }
+    }
+
+    private var latchChoice: HotkeyMonitor.Key? {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: "latchKey") else {
+                return .rightShift
+            }
+            return raw.isEmpty ? nil : HotkeyMonitor.Key(rawValue: raw)
+        }
+        set {
+            UserDefaults.standard.set(newValue?.rawValue ?? "", forKey: "latchKey")
             installHotkey()
             rebuildMenu()
         }
@@ -56,18 +79,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
 
         Log.write("=== launch: LocalFlow \(Self.version) ===")
-        Log.write("bundle      \(Bundle.main.bundlePath)")
-        Log.write("pid         \(ProcessInfo.processInfo.processIdentifier), ppid \(getppid())")
+        Log.write("bundle        \(Bundle.main.bundlePath)")
+        Log.write("pid           \(ProcessInfo.processInfo.processIdentifier), ppid \(getppid())")
         Log.write("accessibility \(AXIsProcessTrusted())")
-        Log.write("mic status  \(Self.micStatusName())")
+        Log.write("mic status    \(Self.micStatusName())")
 
         recorder.prepare()
 
-        // Asked again on first use in beginRecording(). An accessory app's TCC
-        // dialog can appear behind other windows and sit there unnoticed, so a
-        // launch-time request alone is not enough to rely on.
         AudioRecorder.requestPermission { granted in
-            Log.write("requestAccess at launch returned granted=\(granted), "
+            Log.write("requestAccess at launch: granted=\(granted), "
                       + "status now \(Self.micStatusName())")
         }
 
@@ -79,20 +99,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         hotkey?.stop()
-        recorder.stop()
+        _ = recorder.stop()
     }
 
     private func installHotkey() {
         hotkey?.stop()
-        let monitor = HotkeyMonitor(key: hotkeyChoice)
-        monitor.onPress = { [weak self] in self?.beginRecording() }
-        monitor.onRelease = { [weak self] in self?.endRecording() }
+        let monitor = HotkeyMonitor(key: hotkeyChoice, latchKey: latchChoice)
+        monitor.onBegin = { [weak self] latched in self?.beginRecording(latched: latched) }
+        monitor.onPromote = { [weak self] in self?.promoteToLatched() }
+        monitor.onEnd = { [weak self] in self?.endRecording() }
         monitor.onAbort = { [weak self] in self?.abortRecording() }
         monitor.start()
         hotkey = monitor
+        Log.write("hotkey: hold \(hotkeyChoice.displayName)"
+                  + (latchChoice.map { ", latch + \($0.displayName)" } ?? ", no latch"))
     }
-
-    // MARK: - Recording
 
     static func micStatusName() -> String {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
@@ -104,9 +125,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func beginRecording() {
+    // MARK: - Recording
+
+    private func beginRecording(latched: Bool) {
         guard recordingStart == nil else { return }
-        Log.write("hotkey pressed; mic status \(Self.micStatusName())")
+        Log.write("capture begin (latched=\(latched)); mic \(Self.micStatusName())")
 
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
@@ -118,14 +141,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Log.write("status notDetermined -> activating and requesting access")
             NSApp.activate(ignoringOtherApps: true)
             AudioRecorder.requestPermission { [weak self] granted in
-                Log.write("requestAccess returned granted=\(granted), "
-                          + "status now \(AppDelegate.micStatusName())")
+                Log.write("requestAccess returned granted=\(granted)")
                 self?.hud.show(granted
                     ? .done("Microphone granted — hold the key again")
                     : .failed("Microphone denied — System Settings › Privacy › Microphone"))
             }
             return
         default:
+            Log.write("microphone \(Self.micStatusName()) -> opening System Settings")
             hud.show(.failed("Microphone denied — System Settings › Privacy › Microphone"))
             NSWorkspace.shared.open(URL(
                 string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
@@ -146,16 +169,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        isLatched = latched
         recordingStart = Date()
-        hud.show(.recording(seconds: 0))
+        hud.show(.recording(seconds: 0, latched: latched))
         hudTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            guard let start = self?.recordingStart else { return }
-            self?.hud.show(.recording(seconds: Date().timeIntervalSince(start)))
+            guard let self, let start = self.recordingStart else { return }
+            self.hud.show(.recording(seconds: Date().timeIntervalSince(start),
+                                     latched: self.isLatched))
+        }
+        if latched { startLatchCap() }
+    }
+
+    /// The primary key was already held when the latch modifier arrived. Keep
+    /// the audio recorded so far and simply stop waiting for the key to come up.
+    private func promoteToLatched() {
+        guard recordingStart != nil, !isLatched else { return }
+        Log.write("promoted hold -> latched")
+        isLatched = true
+        startLatchCap()
+    }
+
+    private func startLatchCap() {
+        latchCapTimer?.invalidate()
+        latchCapTimer = Timer.scheduledTimer(withTimeInterval: latchCap, repeats: false) {
+            [weak self] _ in
+            guard let self, self.recordingStart != nil else { return }
+            Log.write("latch cap reached (\(Int(self.latchCap))s) -> ending capture")
+            self.hotkey?.forceEnd()
+            self.endRecording()
         }
     }
 
     private func abortRecording() {
         guard recordingStart != nil else { return }
+        Log.write("capture aborted (another key was pressed mid-hold)")
         _ = recorder.stop()
         teardownRecording()
         hud.hide()
@@ -164,16 +211,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func endRecording() {
         guard let start = recordingStart else { return }
         let held = Date().timeIntervalSince(start)
+        let latched = isLatched
         // stop() must be read before teardown -- it is what returns the audio.
         let samples = recorder.stop()
         teardownRecording()
 
-        guard held >= minimumHold else {
+        guard latched || held >= minimumHold else {
+            Log.write("ignored \(String(format: "%.2f", held))s hold (below minimum)")
             hud.hide()
             return
         }
 
-        Log.write("released after \(String(format: "%.2f", held))s, \(samples.count) samples @16kHz")
+        Log.write("capture end after \(String(format: "%.2f", held))s"
+                  + " (latched=\(latched)), \(samples.count) samples @16kHz")
         guard !samples.isEmpty else {
             hud.show(.failed("No audio captured"))
             return
@@ -190,13 +240,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 try client.connect()
                 defer { client.disconnect() }
                 try client.startUtterance(mode: mode, app: app)
-                // ~1s per message keeps any single JSON frame small.
                 for chunk in stride(from: 0, to: samples.count, by: 16_000) {
                     try client.sendAudio(Array(samples[chunk..<min(chunk + 16_000, samples.count)]))
                 }
                 let result = try client.finish()
                 DispatchQueue.main.async { self.deliver(result) }
             } catch {
+                Log.write("daemon error: \(error.localizedDescription)")
                 DispatchQueue.main.async {
                     self.hud.show(.failed(error.localizedDescription))
                 }
@@ -207,25 +257,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func teardownRecording() {
         hudTimer?.invalidate()
         hudTimer = nil
+        latchCapTimer?.invalidate()
+        latchCapTimer = nil
         recordingStart = nil
+        isLatched = false
     }
 
     private func deliver(_ result: DaemonClient.Result) {
         guard !result.text.isEmpty else {
+            Log.write("daemon returned no text (\(result.fallbackReason))")
             hud.show(.failed("No speech detected"))
             return
         }
         lastTranscript = result.text
         rebuildMenu()
+        Log.write("delivered \(result.text.count) chars "
+                  + "(asr \(result.asrMilliseconds)ms, polish \(result.polishMilliseconds)ms, "
+                  + "llm=\(result.usedLLM))")
 
-        // The HUD is dismissed before pasting so it cannot be mistaken for the
-        // frontmost window at the moment the keystroke is posted.
         hud.show(.done(result.text))
         TextInjector.insert(result.text)
-
-        if !result.usedLLM, !result.fallbackReason.isEmpty {
-            NSLog("LocalFlow: polish fell back (%@)", result.fallbackReason)
-        }
     }
 
     // MARK: - Menu
@@ -233,9 +284,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func rebuildMenu() {
         let menu = NSMenu()
 
-        let header = NSMenuItem(
-            title: "LocalFlow \(Self.version) — hold \(hotkeyChoice.displayName)",
-            action: nil, keyEquivalent: "")
+        var title = "LocalFlow \(Self.version) — hold \(hotkeyChoice.displayName)"
+        if let latch = latchChoice {
+            title += " · +\(latch.displayName) to latch"
+        }
+        let header = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
         menu.addItem(.separator())
@@ -252,7 +305,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        let hotkeyItem = NSMenuItem(title: "Hotkey", action: nil, keyEquivalent: "")
+        let hotkeyItem = NSMenuItem(title: "Hold Key", action: nil, keyEquivalent: "")
         let hotkeyMenu = NSMenu()
         for key in HotkeyMonitor.Key.allCases {
             let item = NSMenuItem(title: key.displayName, action: #selector(chooseHotkey(_:)), keyEquivalent: "")
@@ -263,6 +316,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hotkeyItem.submenu = hotkeyMenu
         menu.addItem(hotkeyItem)
+
+        let latchItem = NSMenuItem(title: "Latch Modifier", action: nil, keyEquivalent: "")
+        let latchMenu = NSMenu()
+        let none = NSMenuItem(title: "None (hold only)", action: #selector(chooseLatch(_:)), keyEquivalent: "")
+        none.state = latchChoice == nil ? .on : .off
+        none.representedObject = ""
+        none.target = self
+        latchMenu.addItem(none)
+        latchMenu.addItem(.separator())
+        for key in HotkeyMonitor.Key.allCases where key != hotkeyChoice {
+            let item = NSMenuItem(title: key.displayName, action: #selector(chooseLatch(_:)), keyEquivalent: "")
+            item.state = key == latchChoice ? .on : .off
+            item.representedObject = key.rawValue
+            item.target = self
+            latchMenu.addItem(item)
+        }
+        latchItem.submenu = latchMenu
+        menu.addItem(latchItem)
 
         if !lastTranscript.isEmpty {
             let copyItem = NSMenuItem(
@@ -289,9 +360,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configItem.target = self
         menu.addItem(configItem)
 
+        let logItem = NSMenuItem(title: "Open App Log", action: #selector(openLog), keyEquivalent: "")
+        logItem.target = self
+        menu.addItem(logItem)
+
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit LocalFlow", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        menu.addItem(quit)
+        menu.addItem(NSMenuItem(title: "Quit LocalFlow",
+                                action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
         statusItem?.menu = menu
     }
@@ -303,6 +378,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let raw = sender.representedObject as? String,
               let key = HotkeyMonitor.Key(rawValue: raw) else { return }
         hotkeyChoice = key
+    }
+
+    @objc private func chooseLatch(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String else { return }
+        latchChoice = raw.isEmpty ? nil : HotkeyMonitor.Key(rawValue: raw)
     }
 
     @objc private func copyLast() {
@@ -327,8 +407,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openConfig() {
-        let path = (NSHomeDirectory() as NSString)
-            .appendingPathComponent("Library/Application Support/LocalFlow/config.json")
-        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+        NSWorkspace.shared.open(URL(fileURLWithPath: (NSHomeDirectory() as NSString)
+            .appendingPathComponent("Library/Application Support/LocalFlow/config.json")))
+    }
+
+    @objc private func openLog() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: (NSHomeDirectory() as NSString)
+            .appendingPathComponent("Library/Application Support/LocalFlow/app.log")))
     }
 }
