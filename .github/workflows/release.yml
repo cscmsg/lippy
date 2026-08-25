@@ -96,6 +96,10 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: LocalFlow-dmg
+          # .dist is a dot-directory and upload-artifact excludes hidden paths
+          # by default, which silently uploads nothing and annotates the run as
+          # if the build had produced no files.
+          include-hidden-files: true
           path: |
             .dist/LocalFlow-*.dmg
             .dist/SHA256SUMS.txt

@@ -5,9 +5,12 @@
 # alongside a release. Copy it across when cutting one.
 #
 #   sha256: shasum -a 256 LocalFlow-<version>.dmg   (also in SHA256SUMS.txt)
+# WARNING: the v0.8.0 build is ad-hoc signed, not notarised, because the Apple
+# secrets are not yet present in this repository. Gatekeeper rejects it. Do not
+# publish this cask to a tap until a signed release exists.
 cask "localflow" do
   version "0.8.0"
-  sha256 "REPLACE_WITH_RELEASE_CHECKSUM"
+  sha256 "cf7ad4d69ada5e877a23545fba3e6a3d08431f97d86789e93ec2eae0c60fa03b"
 
   url "https://github.com/cscmsg/localflow/releases/download/v#{version}/LocalFlow-#{version}.dmg"
   name "LocalFlow"
