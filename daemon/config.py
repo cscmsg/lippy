@@ -12,21 +12,14 @@ CONFIG_PATH = SUPPORT_DIR / "config.json"
 SOCKET_PATH = SUPPORT_DIR / "flowd.sock"
 LOG_PATH = SUPPORT_DIR / "flowd.log"
 
-# Proper nouns Parakeet has no reason to know. Extend this in the config file;
-# these are seeded so the first run already knows the words used daily here.
-DEFAULT_DICTIONARY = {
-    "lex cloak": "Lex Cloak",
-    "lexcloak": "Lex Cloak",
-    "lex clock": "Lex Cloak",
-    "lex cloke": "Lex Cloak",
-    "monty home": "Monty Home",
-    "montyhome": "Monty Home",
-    "nice f": "NYSCEF",
-    "nyscef": "NYSCEF",
-    "i app": "IAPP",
-    "sipped": "CIPT",
-    "kanban": "Kanban",
-}
+# Empty by design. This is where proper nouns the speech model has never seen
+# get corrected -- names, acronyms, jargon, product names. Add your own to
+# `dictionary` in config.json as you catch mistakes:
+#
+#     "dictionary": { "nice f": "NYSCEF", "cue three": "Q3" }
+#
+# Matching is case-insensitive and on word boundaries, longest key first.
+DEFAULT_DICTIONARY: dict[str, str] = {}
 
 
 @dataclass

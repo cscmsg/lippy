@@ -64,7 +64,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 	<key>NSMicrophoneUsageDescription</key>
 	<string>LocalFlow transcribes your speech on this Mac. Audio is never sent anywhere.</string>
 	<key>NSHumanReadableCopyright</key>
-	<string>Private tool — Courtney Cook</string>
+	<string>Copyright (c) 2026 Courtney Cook. MIT licensed.</string>
 </dict>
 </plist>
 PLIST
