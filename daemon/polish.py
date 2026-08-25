@@ -15,7 +15,9 @@ the deterministic rule-cleaned text, which is never wrong in an interesting way.
 
 from __future__ import annotations
 
+import json
 import logging
+import pathlib
 import re
 import time
 from dataclasses import dataclass
@@ -167,10 +169,12 @@ def validate(source: str, candidate: str) -> tuple[bool, str]:
     return True, ""
 
 
-class Polisher:
-    """Holds an mlx-lm model warm and polishes one utterance at a time."""
+class MlxEngine:
+    """mlx-lm, Apple Silicon. The macOS engine."""
 
-    def __init__(self, model_id: str = "mlx-community/Qwen3-4B-Instruct-2507-4bit") -> None:
+    name = "mlx"
+
+    def __init__(self, model_id: str) -> None:
         from mlx_lm import load
         from mlx_lm.sample_utils import make_sampler
 
@@ -181,6 +185,100 @@ class Polisher:
         self.sampler = make_sampler(temp=0.0)
         log.info("loaded %s in %.1fs", model_id, time.perf_counter() - t0)
 
+    def format(self, messages: list[dict]) -> str:
+        return self.tokenizer.apply_chat_template(
+            messages, add_generation_prompt=True, tokenize=False)
+
+    def count_tokens(self, text: str) -> int:
+        return len(self.tokenizer.encode(text))
+
+    def generate(self, prompt: str, max_tokens: int) -> str:
+        from mlx_lm import generate
+        return generate(self.model, self.tokenizer, prompt=prompt,
+                        max_tokens=max_tokens, sampler=self.sampler, verbose=False)
+
+
+class OnnxEngine:
+    """ONNX Runtime GenAI. The Windows and Linux engine.
+
+    MLX is Apple-only, so everywhere else runs the same family of model through
+    ONNX Runtime instead. Note the model is expected to be a *genai-format*
+    build -- a directory containing genai_config.json -- not the plain ONNX
+    export, which this runtime cannot load.
+    """
+
+    name = "onnx"
+
+    def __init__(self, model_path: str) -> None:
+        import onnxruntime_genai as og
+
+        self.og = og
+        self.model_id = model_path
+        t0 = time.perf_counter()
+        self.model = og.Model(model_path)
+        self.tokenizer = og.Tokenizer(self.model)
+        log.info("loaded %s in %.1fs (%s)", model_path,
+                 time.perf_counter() - t0, self.model.device_type)
+
+    def format(self, messages: list[dict]) -> str:
+        # The runtime's own chat templating, when the model config carries a
+        # template. Falling back to a hand-rolled ChatML string keeps a model
+        # without one usable rather than failing at load.
+        try:
+            return self.tokenizer.apply_chat_template(
+                messages=json.dumps(messages), add_generation_prompt=True)
+        except Exception:
+            parts = [f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>" for m in messages]
+            return "\n".join(parts) + "\n<|im_start|>assistant\n"
+
+    def count_tokens(self, text: str) -> int:
+        return len(self.tokenizer.encode(text))
+
+    def generate(self, prompt: str, max_tokens: int) -> str:
+        tokens = self.tokenizer.encode(prompt)
+        params = self.og.GeneratorParams(self.model)
+        # do_sample False: same utterance, same cleanup, every time.
+        params.set_search_options(do_sample=False,
+                                  max_length=len(tokens) + max_tokens)
+        generator = self.og.Generator(self.model, params)
+        generator.append_tokens(tokens)
+
+        produced = []
+        while not generator.is_done():
+            generator.generate_next_token()
+            produced.append(generator.get_next_tokens()[0])
+        return self.tokenizer.decode(produced)
+
+
+def build_engine(model_id: str, engine: str | None = None):
+    """Pick an engine. Explicit wins; otherwise infer from the identifier.
+
+    A filesystem path is an ONNX model directory; a Hugging Face repo id in the
+    mlx-community namespace is an MLX model.
+    """
+    if engine == "mlx":
+        return MlxEngine(model_id)
+    if engine == "onnx":
+        return OnnxEngine(model_id)
+    if pathlib.Path(model_id).is_dir():
+        return OnnxEngine(model_id)
+    return MlxEngine(model_id)
+
+
+class Polisher:
+    """Holds a model warm and polishes one utterance at a time.
+
+    The engine differs by platform; everything that decides whether a cleanup is
+    *safe* -- the prompt, the examples, and the four guards -- does not. That is
+    deliberate: those rules are the reason pasted text can be trusted without
+    proofreading, and a second copy of them would drift.
+    """
+
+    def __init__(self, model_id: str = "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+                 engine: str | None = None) -> None:
+        self.engine = build_engine(model_id, engine)
+        self.model_id = model_id
+
     def _build_prompt(self, text: str, app_hint: str | None = None) -> str:
         system = SYSTEM_PROMPT
         if app_hint:
@@ -190,9 +288,7 @@ class Polisher:
             messages.append({"role": "user", "content": raw})
             messages.append({"role": "assistant", "content": clean})
         messages.append({"role": "user", "content": text})
-        return self.tokenizer.apply_chat_template(
-            messages, add_generation_prompt=True, tokenize=False
-        )
+        return self.engine.format(messages)
 
     def warm_up(self) -> None:
         self.polish("Um, this is a warm up sentence.")
@@ -201,18 +297,13 @@ class Polisher:
         if not text.strip():
             return PolishResult("", used_llm=False, reason="empty input")
 
-        from mlx_lm import generate
-
         prompt = self._build_prompt(text, app_hint)
         # Cleanup never legitimately needs more tokens than the input plus a
         # margin; capping it bounds both latency and runaway generation.
-        budget = int(len(self.tokenizer.encode(text)) * 1.5) + 32
+        budget = int(self.engine.count_tokens(text) * 1.5) + 32
 
         t0 = time.perf_counter()
-        raw = generate(
-            self.model, self.tokenizer, prompt=prompt,
-            max_tokens=budget, sampler=self.sampler, verbose=False,
-        )
+        raw = self.engine.generate(prompt, budget)
         elapsed = time.perf_counter() - t0
 
         candidate = _strip_wrapping(raw)

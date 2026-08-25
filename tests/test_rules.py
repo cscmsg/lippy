@@ -101,3 +101,52 @@ def test_sentences_are_recapitalised_after_filler_removal():
 def test_lines_are_capitalised_after_new_paragraph():
     out = clean("first thought new paragraph second thought")
     assert out == "First thought\n\nSecond thought"
+
+
+def test_cleanup_dial_levels_do_progressively_more():
+    """Each step should do strictly more than the one below it."""
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "daemon"))
+    from config import Config
+
+    cfg = Config(dictionary={"lex cloak": "Lex Cloak"})
+    spoken = "um so the the report on lex cloak is uh done"
+
+    fillers = clean(spoken, cfg.rule_config("fillers"))
+    full = clean(spoken, cfg.rule_config("clean"))
+
+    # "fillers" drops um/uh but leaves the stutter and the proper noun alone.
+    assert "um" not in fillers.lower().split()
+    assert "the the" in fillers.lower()
+    assert "Lex Cloak" not in fillers
+
+    # "clean" additionally collapses the stutter and applies the dictionary.
+    assert "the the" not in full.lower()
+    assert "Lex Cloak" in full
+
+
+def test_config_migrates_a_renamed_setting_instead_of_refusing_to_start():
+    """An existing config from an older version must still load."""
+    import sys, pathlib, json, tempfile
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "daemon"))
+    from config import Config
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "config.json"
+        path.write_text(json.dumps({"polish_enabled": False, "strip_fillers": True}))
+        cfg = Config.load(path)
+        assert cfg.cleanup_level == "clean"
+
+        path.write_text(json.dumps({"polish_enabled": True}))
+        assert Config.load(path).cleanup_level == "polish"
+
+
+def test_config_ignores_an_unknown_key_rather_than_failing():
+    import sys, pathlib, json, tempfile
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "daemon"))
+    from config import Config
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "config.json"
+        path.write_text(json.dumps({"strip_fillers": False, "nonsense_key": 1}))
+        assert Config.load(path).strip_fillers is False

@@ -3,7 +3,7 @@ import AVFoundation
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
-    static let version = "0.8.0"
+    static let version = "0.9.0"
 
     private let recorder = AudioRecorder()
     private let hud = HUD()
@@ -341,15 +341,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(header)
         menu.addItem(.separator())
 
-        let polished = NSMenuItem(title: "Polished", action: #selector(setPolished), keyEquivalent: "")
-        polished.state = mode == "polish" ? .on : .off
-        polished.target = self
-        menu.addItem(polished)
-
-        let verbatim = NSMenuItem(title: "Verbatim", action: #selector(setVerbatim), keyEquivalent: "")
-        verbatim.state = mode == "raw" ? .on : .off
-        verbatim.target = self
-        menu.addItem(verbatim)
+        // Four steps, in increasing cost. Only the last needs a language model,
+        // which is what makes the others usable on weaker hardware.
+        for (level, title) in [("raw", "Verbatim"),
+                               ("fillers", "Drop fillers"),
+                               ("clean", "Clean up"),
+                               ("polish", "Polish")] {
+            let item = NSMenuItem(title: title, action: #selector(setLevel(_:)), keyEquivalent: "")
+            item.state = mode == level ? .on : .off
+            item.representedObject = level
+            item.target = self
+            menu.addItem(item)
+        }
 
         let loginItem: NSMenuItem
         switch LoginItem.state {
@@ -477,8 +480,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         LoginItem.openLoginItemsSettings()
     }
 
-    @objc private func setPolished() { mode = "polish" }
-    @objc private func setVerbatim() { mode = "raw" }
+    @objc private func setLevel(_ sender: NSMenuItem) {
+        guard let level = sender.representedObject as? String else { return }
+        mode = level
+    }
 
     @objc private func chooseHotkey(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,

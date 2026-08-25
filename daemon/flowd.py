@@ -54,7 +54,7 @@ class Engine:
         self.asr.warm_up()
 
         self.polisher = None
-        if cfg.polish_enabled:
+        if cfg.cleanup_level == "polish":
             import polish
             log.info("loading polish model %s", cfg.polish_model)
             self.polisher = polish.Polisher(cfg.polish_model)
@@ -73,7 +73,11 @@ class Engine:
                     "fallback_reason": "no speech detected",
                 }
 
-            ruled = rules.clean(raw_text, self.cfg.rule_config())
+            # "raw" means raw: hand back exactly what the speech model heard.
+            if mode == "raw":
+                ruled = raw_text
+            else:
+                ruled = rules.clean(raw_text, self.cfg.rule_config(mode))
 
             polished, used_llm, reason, polish_s = ruled, False, "", 0.0
             if mode == "polish" and self.polisher is not None:
@@ -130,6 +134,7 @@ class Handler(socketserver.StreamRequestHandler):
                     protocol.send(self.request, {
                         "type": "status", "ready": True,
                         "asr": engine.asr.name,
+                        "level": engine.cfg.cleanup_level,
                         "polish": engine.cfg.polish_model if engine.polisher else None,
                     })
 
@@ -171,8 +176,10 @@ def main() -> int:
 
     parser = argparse.ArgumentParser(description="LocalFlow dictation daemon")
     parser.add_argument("--socket", type=pathlib.Path, default=None)
+    parser.add_argument("--level", choices=config_mod.CLEANUP_LEVELS,
+                        help="cleanup dial: raw | fillers | clean | polish")
     parser.add_argument("--no-polish", action="store_true",
-                        help="skip loading the LLM (ASR + rules only)")
+                        help="shorthand for --level clean")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -186,7 +193,9 @@ def main() -> int:
 
     cfg = config_mod.Config.load()
     if args.no_polish:
-        cfg.polish_enabled = False
+        cfg.cleanup_level = "clean"
+    if args.level:
+        cfg.cleanup_level = args.level
     if not config_mod.CONFIG_PATH.exists():
         cfg.save()
         log.info("wrote default config to %s", config_mod.CONFIG_PATH)

@@ -78,7 +78,7 @@ enum Diagnose {
             rawValue: UserDefaults.standard.string(forKey: "hotkey") ?? "") ?? .rightOption
         let mode = UserDefaults.standard.string(forKey: "mode") ?? "polish"
         report("Hotkey", true, "hold \(key.displayName)")
-        report("Mode", true, mode == "polish" ? "polished (LLM pass on)" : "verbatim (rules only)")
+        report("Cleanup", true, mode)
 
         print("\n\(healthy ? "Ready to dictate." : "Not ready — see the ✗ lines above.")")
         return healthy ? 0 : 1

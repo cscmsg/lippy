@@ -13,6 +13,8 @@ half the point of building this locally in the first place.
 from __future__ import annotations
 
 import logging
+import os
+import pathlib
 import time
 from dataclasses import dataclass
 
@@ -75,6 +77,64 @@ class ParakeetBackend:
         return Transcript(text, duration, time.perf_counter() - t0)
 
 
+class SherpaBackend:
+    """Parakeet via sherpa-onnx / ONNX Runtime. The cross-platform backend.
+
+    Same model family as ParakeetBackend, different runtime. MLX is Apple-only,
+    so Windows and Linux run the ONNX export instead. int8-quantised, which is
+    643 MB against MLX's 2.51 GB -- a real difference when the whole thing has
+    to fit in a Store package.
+
+    Kept in the same file as the MLX backend on purpose: they must produce
+    comparable text, and that is easier to keep true when they are read side by
+    side.
+    """
+
+    name = "sherpa"
+
+    def __init__(self, model_dir: str | None = None) -> None:
+        import sherpa_onnx
+
+        directory = pathlib.Path(
+            model_dir
+            or os.environ.get("LOCALFLOW_ONNX_MODEL_DIR")
+            or pathlib.Path.home() / ".cache" / "localflow-onnx"
+            / "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
+        )
+        if not directory.is_dir():
+            raise FileNotFoundError(f"ONNX model directory not found: {directory}")
+
+        t0 = time.perf_counter()
+        self._recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
+            encoder=str(directory / "encoder.int8.onnx"),
+            decoder=str(directory / "decoder.int8.onnx"),
+            joiner=str(directory / "joiner.int8.onnx"),
+            tokens=str(directory / "tokens.txt"),
+            # NeMo transducers use a different blank/label convention to the
+            # k2 ones sherpa defaults to; the wrong model_type decodes to
+            # confident nonsense rather than failing.
+            model_type="nemo_transducer",
+            decoding_method="greedy_search",
+            num_threads=max(2, (os.cpu_count() or 4) // 2),
+        )
+        log.info("loaded %s in %.1fs", directory.name, time.perf_counter() - t0)
+
+    def warm_up(self) -> None:
+        self._transcribe_array(np.zeros(int(SAMPLE_RATE * 0.5), dtype=np.float32))
+
+    def _transcribe_array(self, pcm: np.ndarray) -> str:
+        stream = self._recognizer.create_stream()
+        stream.accept_waveform(SAMPLE_RATE, pcm)
+        self._recognizer.decode_stream(stream)
+        return stream.result.text.strip()
+
+    def transcribe(self, pcm: np.ndarray) -> Transcript:
+        duration = len(pcm) / SAMPLE_RATE
+        t0 = time.perf_counter()
+        text = "" if _is_silence(pcm, duration) else self._transcribe_array(pcm)
+        return Transcript(text, duration, time.perf_counter() - t0)
+
+
 class WhisperBackend:
     """OpenAI Whisper large-v3-turbo via MLX. Broader language coverage.
 
@@ -126,6 +186,8 @@ def _is_silence(pcm: np.ndarray, duration: float) -> bool:
 def build(backend: str, model_id: str | None = None):
     if backend == "parakeet":
         return ParakeetBackend(model_id) if model_id else ParakeetBackend()
+    if backend == "sherpa":
+        return SherpaBackend(model_id) if model_id else SherpaBackend()
     if backend == "whisper":
         return WhisperBackend(model_id) if model_id else WhisperBackend()
     raise ValueError(f"unknown ASR backend: {backend!r}")

@@ -203,7 +203,19 @@ stays in **Copy Last Transcript** and in `flowctl last`.
 - **`aggressive_fillers`** — off by default. On, it also strips *like*, *you know*,
   *I mean*, *basically*, *actually*. These are content often enough that removing
   them is an edit, not a cleanup, which is why you have to ask for it.
-- **`polish_enabled: false`** — rules only, ~200ms end to end.
+- **`cleanup_level`** — how hard to work. Measured on the same 10s recording:
+
+  | Level | Round trip | What it does |
+  |---|---|---|
+  | `raw` | 190ms | exactly what the speech model heard |
+  | `fillers` | 210ms | drops um / uh / er |
+  | `clean` | 221ms | + stutters, false starts, punctuation, capitals, dictionary |
+  | `polish` | 1057ms | + an LLM pass over the result |
+
+  Only `polish` needs a language model. Everything below it is deterministic
+  regex — sub-millisecond, and it ports to any platform as plain logic. On that
+  sample the LLM's whole contribution was joining one sentence fragment, which
+  is why `clean` is the right default anywhere a 4B model is a stretch.
 
 Restart the daemon after editing: `launchctl kickstart -k gui/$(id -u)/com.cscmsg.localflow.flowd`
 

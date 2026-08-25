@@ -84,7 +84,8 @@ def cmd_file(args) -> int:
     pcm = load_wav(args.path)
     sock = connect(args.socket)
     t0 = time.perf_counter()
-    result = send_audio(sock, pcm, "raw" if args.raw else "polish", args.app)
+    level = args.level or ("raw" if args.raw else "polish")
+    result = send_audio(sock, pcm, level, args.app)
     wall = time.perf_counter() - t0
 
     if args.json:
@@ -123,7 +124,10 @@ def main() -> int:
 
     p_file = sub.add_parser("file", help="run an audio file through the pipeline")
     p_file.add_argument("path", type=pathlib.Path)
-    p_file.add_argument("--raw", action="store_true", help="skip the LLM polish pass")
+    p_file.add_argument("--level", default=None,
+                        choices=("raw", "fillers", "clean", "polish"),
+                        help="cleanup dial")
+    p_file.add_argument("--raw", action="store_true", help="shorthand for --level raw")
     p_file.add_argument("--app", help="pretend the text is destined for this app")
     p_file.add_argument("--json", action="store_true")
     p_file.set_defaults(fn=cmd_file)
