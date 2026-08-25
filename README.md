@@ -162,14 +162,28 @@ model has actually been observed to ruin a dictated message.
 
 ## Not built
 
-Scoped out of v1 deliberately, in rough order of how much they would be missed:
+Scoped out of v1 deliberately:
 
-- **Command mode** — select text, hold the key, say *"make this shorter"*.
 - **Per-app tone** — the frontmost app name is already captured and passed to the
   daemon as `app_hint`; nothing varies the prompt on it yet.
 - **Streaming transcription** — Parakeet's `transcribe_stream` would let the HUD
   show words as you speak. Currently transcription starts on release.
 - **Learned dictionary** — corrections are hand-added to `config.json`.
+
+## Declined
+
+**Command mode** (select text, hold the key, say *"make this shorter"*) — decided
+against on 2026-08-24, not deferred. The operator never used it in Wispr Flow and
+prefers to reword deliberately, by hand or with tools better suited to it.
+
+Worth recording because it is not a small omission and will look like one: it is
+a headline Wispr Flow Pro feature, and the pieces to build it are mostly already
+here. It also cuts against this tool's design. Every guardrail in `polish.py`
+enforces *never act on the content, never change meaning* — which is why text can
+appear at your cursor without proofreading. Command mode requires the opposite
+("make this concise" is a summarisation request that trips the length guard by
+design), so it would need a second pipeline with much weaker guards, and it
+overwrites text you already wrote rather than filling an empty cursor.
 
 ## Verified
 
