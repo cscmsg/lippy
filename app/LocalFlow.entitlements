@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	Required because this app is signed with the hardened runtime.
+	Under hardened runtime the microphone is a protected resource that the
+	runtime blocks unless the binary carries this entitlement. The request is
+	refused before TCC is consulted, so no prompt appears and the app never
+	shows up in System Settings, Privacy and Security, Microphone.
+
+	The failure is silent and looks exactly like a broken app:
+	authorizationStatus returns denied, with nothing for the user to grant.
+	-->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>

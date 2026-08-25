@@ -62,13 +62,22 @@ PLIST
 IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
   | grep -E '"(Developer ID Application|Apple Development)' | head -1 | awk '{print $2}')}"
 
+# --entitlements is not optional here: with --options runtime and no
+# entitlements file, the hardened runtime silently blocks the microphone.
 if [ -n "${IDENTITY:-}" ]; then
-  codesign --force --options runtime --sign "$IDENTITY" "$APP"
+  codesign --force --options runtime \
+    --entitlements app/LocalFlow.entitlements --sign "$IDENTITY" "$APP"
   echo "Signed with: $(codesign -dvv "$APP" 2>&1 | grep '^Authority' | head -1 | cut -d= -f2)"
 else
-  codesign --force --sign - "$APP"
+  codesign --force --entitlements app/LocalFlow.entitlements --sign - "$APP"
   echo "WARNING: ad-hoc signed - macOS will require re-granting Accessibility and"
   echo "         Microphone access after every rebuild."
+fi
+
+# Guard: a build without this entitlement looks fine and cannot use the mic.
+if ! codesign -d --entitlements - "$APP" 2>&1 | grep -q "audio-input"; then
+  echo "ERROR: microphone entitlement missing from the signed bundle." >&2
+  exit 1
 fi
 
 echo "Built $APP (v${VERSION})"
