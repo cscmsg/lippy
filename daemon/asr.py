@@ -1,0 +1,131 @@
+"""Speech-to-text backends.
+
+Parakeet TDT 0.6B v3 is the default and the reason this feels instant: it is a
+0.6B transducer that runs far faster than realtime on Apple Silicon, emits its
+own punctuation and capitalisation, and -- critically for push-to-talk --
+returns an empty string for silence instead of inventing text. Whisper
+large-v3-turbo is kept as a fallback for the languages Parakeet does not cover.
+
+Both backends take PCM already in memory. Nothing is written to disk, which is
+half the point of building this locally in the first place.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from dataclasses import dataclass
+
+import numpy as np
+
+log = logging.getLogger("localflow.asr")
+
+SAMPLE_RATE = 16_000
+
+# Below these, there is nothing to transcribe and running a model on it only
+# invites hallucination. RMS of true silence is ~1e-5; speech is ~1e-2.
+MIN_DURATION_S = 0.25
+MIN_RMS = 1e-3
+
+
+@dataclass
+class Transcript:
+    text: str
+    duration_s: float
+    compute_s: float
+
+    @property
+    def realtime_factor(self) -> float:
+        return self.duration_s / self.compute_s if self.compute_s else 0.0
+
+
+class ParakeetBackend:
+    """NVIDIA Parakeet TDT via MLX. English-strong, 25 languages, CC-BY-4.0."""
+
+    name = "parakeet"
+
+    def __init__(self, model_id: str = "mlx-community/parakeet-tdt-0.6b-v3") -> None:
+        from parakeet_mlx import from_pretrained
+
+        self.model_id = model_id
+        t0 = time.perf_counter()
+        self._model = from_pretrained(model_id)
+        log.info("loaded %s in %.1fs", model_id, time.perf_counter() - t0)
+
+    def warm_up(self) -> None:
+        """Force Metal kernel compilation now, not on the user's first word.
+
+        The first generate() call costs ~1s of shader compilation. Paying it at
+        daemon start makes every real utterance fast.
+        """
+        self._transcribe_array(np.zeros(int(SAMPLE_RATE * 0.5), dtype=np.float32))
+
+    def _transcribe_array(self, pcm: np.ndarray) -> str:
+        import mlx.core as mx
+        from parakeet_mlx.audio import get_logmel
+
+        mel = get_logmel(mx.array(pcm), self._model.preprocessor_config)
+        results = self._model.generate(mel)
+        return results[0].text.strip() if results else ""
+
+    def transcribe(self, pcm: np.ndarray) -> Transcript:
+        duration = len(pcm) / SAMPLE_RATE
+        t0 = time.perf_counter()
+        text = "" if _is_silence(pcm, duration) else self._transcribe_array(pcm)
+        return Transcript(text, duration, time.perf_counter() - t0)
+
+
+class WhisperBackend:
+    """OpenAI Whisper large-v3-turbo via MLX. Broader language coverage.
+
+    Note the tradeoff that made it the fallback rather than the default:
+    Whisper hallucinates confident text over silence and background noise,
+    which is exactly what the leading and trailing edges of a push-to-talk
+    recording contain.
+    """
+
+    name = "whisper"
+
+    def __init__(self, model_id: str = "mlx-community/whisper-large-v3-turbo") -> None:
+        self.model_id = model_id
+        import mlx_whisper  # noqa: F401  (import cost paid at construction)
+
+    def warm_up(self) -> None:
+        self._transcribe_array(np.zeros(int(SAMPLE_RATE * 0.5), dtype=np.float32))
+
+    def _transcribe_array(self, pcm: np.ndarray) -> str:
+        import mlx_whisper
+
+        result = mlx_whisper.transcribe(
+            pcm,
+            path_or_hf_repo=self.model_id,
+            # condition_on_previous_text=False cuts Whisper's habit of looping
+            # a phrase once it starts repeating itself.
+            condition_on_previous_text=False,
+            temperature=0.0,
+        )
+        return result["text"].strip()
+
+    def transcribe(self, pcm: np.ndarray) -> Transcript:
+        duration = len(pcm) / SAMPLE_RATE
+        t0 = time.perf_counter()
+        text = "" if _is_silence(pcm, duration) else self._transcribe_array(pcm)
+        return Transcript(text, duration, time.perf_counter() - t0)
+
+
+def _is_silence(pcm: np.ndarray, duration: float) -> bool:
+    if duration < MIN_DURATION_S:
+        return True
+    rms = float(np.sqrt(np.mean(np.square(pcm, dtype=np.float64))))
+    if rms < MIN_RMS:
+        log.info("rejected as silence (rms=%.2e, %.2fs)", rms, duration)
+        return True
+    return False
+
+
+def build(backend: str, model_id: str | None = None):
+    if backend == "parakeet":
+        return ParakeetBackend(model_id) if model_id else ParakeetBackend()
+    if backend == "whisper":
+        return WhisperBackend(model_id) if model_id else WhisperBackend()
+    raise ValueError(f"unknown ASR backend: {backend!r}")

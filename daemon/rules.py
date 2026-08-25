@@ -1,0 +1,166 @@
+"""Deterministic transcript cleanup.
+
+Everything here is rule-based and reversible in your head: no model, no
+randomness, no network. It runs before the LLM polish pass and does the work
+that does not need judgement -- and on `--raw` it is the *only* pass, so it has
+to leave text you would be happy to send.
+
+Design rule: when a rule could plausibly damage meaning, it is off by default.
+A filler word left in is a blemish; a word silently deleted is a bug.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+
+# Non-lexical fillers only. These are never meaningful words in English, so
+# deleting them cannot change meaning. Deliberately NOT here: "like", "you
+# know", "I mean", "actually", "basically" -- all of them carry meaning often
+# enough that removal is a content edit, not a cleanup. They live in
+# config.aggressive_fillers for anyone who wants them.
+FILLERS = {
+    "um", "uh", "umm", "uhh", "uhm", "erm", "eh", "ah", "ahh",
+    "mm", "mmm", "hmm", "hm", "er",
+}
+
+AGGRESSIVE_FILLERS = {
+    "like", "you know", "i mean", "sort of", "kind of", "basically", "actually",
+}
+
+# Word pairs where an immediate repeat is real English, so the stutter collapser
+# must leave them alone. "I had had lunch", "that that he said", "no no no".
+LEGITIMATE_DOUBLES = {
+    "had", "that", "no", "very", "really", "so", "well", "now", "long",
+    "far", "much", "many", "again", "ha", "bye", "yes", "never",
+}
+
+# Spoken commands. Punctuation commands are absent on purpose: Parakeet already
+# emits punctuation, so a "period" rule mostly fires on "the period of time".
+# These three are unambiguous enough to be safe.
+SPOKEN_COMMANDS = [
+    (r"\bnew paragraph\b", "\n\n"),
+    (r"\bnew line\b", "\n"),
+]
+
+SCRATCH_THAT = re.compile(r"\bscratch that\b", re.IGNORECASE)
+
+
+@dataclass
+class RuleConfig:
+    strip_fillers: bool = True
+    aggressive_fillers: bool = False
+    collapse_stutters: bool = True
+    spoken_commands: bool = True
+    dictionary: dict[str, str] = field(default_factory=dict)
+
+
+def _strip_fillers(text: str, cfg: RuleConfig) -> str:
+    words = FILLERS | (AGGRESSIVE_FILLERS if cfg.aggressive_fillers else set())
+    # Longest first so "you know" is tried before "you".
+    for phrase in sorted(words, key=len, reverse=True):
+        pattern = re.compile(
+            # The word-boundary lookbehind must sit immediately before the
+            # filler, not before the optional comma -- otherwise ", um," never
+            # matches, because the character before the comma is a word char.
+            r"[,]?\s*(?<![\w'])" + re.escape(phrase) + r"(?![\w'])\s*[,]?\s*",
+            re.IGNORECASE,
+        )
+        text = pattern.sub(" ", text)
+    return text
+
+
+def _collapse_stutters(text: str) -> str:
+    """Collapse "the the cat" -> "the cat", and "th- the cat" -> "the cat"."""
+    # Dropped false starts: a word fragment ending in a hyphen.
+    text = re.sub(r"\b[a-z]{1,4}-\s+", "", text, flags=re.IGNORECASE)
+
+    def repl(match: re.Match[str]) -> str:
+        first, second = match.group(1), match.group(3)
+        if first.lower() in LEGITIMATE_DOUBLES:
+            return match.group(0)
+        return second
+
+    # Run twice so triples ("the the the") fully collapse.
+    for _ in range(2):
+        text = re.sub(r"\b(\w+)(\s+)(\1)\b", lambda m: repl(m), text, flags=re.IGNORECASE)
+    return text
+
+
+def _apply_spoken_commands(text: str) -> str:
+    # "scratch that" deletes the clause before it, which is what people mean.
+    while True:
+        match = SCRATCH_THAT.search(text)
+        if not match:
+            break
+        before = text[: match.start()].rstrip()
+        after = text[match.end():]
+        # The retracted sentence may already carry its own full stop; step past
+        # it so the search below finds the boundary of the sentence BEFORE it.
+        if before and before[-1] in ".?!":
+            before = before[:-1]
+        boundary = max(before.rfind("."), before.rfind("?"), before.rfind("!"))
+        # No earlier boundary means the speaker retracted everything so far.
+        before = before[: boundary + 1] if boundary >= 0 else ""
+        text = (before + " " + after.lstrip(" ,.")).strip()
+
+    for pattern, replacement in SPOKEN_COMMANDS:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
+
+
+def _apply_dictionary(text: str, dictionary: dict[str, str]) -> str:
+    """Fix proper nouns the ASR model has never seen.
+
+    Keys are matched case-insensitively on word boundaries, longest first so
+    "lex cloak app" beats "lex cloak".
+    """
+    for wrong in sorted(dictionary, key=len, reverse=True):
+        right = dictionary[wrong]
+        text = re.sub(
+            r"(?<![\w'])" + re.escape(wrong) + r"(?![\w'])",
+            right.replace("\\", "\\\\"),
+            text,
+            flags=re.IGNORECASE,
+        )
+    return text
+
+
+def _tidy(text: str) -> str:
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r" *\n *", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+    text = re.sub(r"\bi\b", "I", text)
+    text = re.sub(r",\s*,", ",", text)
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+    text = text.strip()
+    text = _capitalise_sentences(text)
+    return text
+
+
+def _capitalise_sentences(text: str) -> str:
+    """Uppercase the first letter of every sentence and of every line."""
+    def upper_after(match: re.Match[str]) -> str:
+        return match.group(1) + match.group(2).upper()
+
+    text = re.sub(r"([.!?]\s+|\n+)([a-z])", upper_after, text)
+    if text:
+        text = text[0].upper() + text[1:]
+    return text
+
+
+def clean(text: str, cfg: RuleConfig | None = None) -> str:
+    """Full deterministic pass. Safe to run on already-clean text."""
+    cfg = cfg or RuleConfig()
+    if not text or not text.strip():
+        return ""
+    if cfg.strip_fillers:
+        text = _strip_fillers(text, cfg)
+    if cfg.collapse_stutters:
+        text = _collapse_stutters(text)
+    if cfg.spoken_commands:
+        text = _apply_spoken_commands(text)
+    if cfg.dictionary:
+        text = _apply_dictionary(text, cfg.dictionary)
+    return _tidy(text)

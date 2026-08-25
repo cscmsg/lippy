@@ -1,0 +1,7 @@
+# Pinned to what was verified working on 2026-08-24 (macOS 26.5.1, M4 Pro).
+parakeet-mlx==0.5.2
+mlx-lm==0.31.3
+mlx-whisper==0.4.3
+soundfile==0.14.0
+numpy==2.5.2
+pytest==9.1.1
