@@ -15,9 +15,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// whatever app the user is typing into.
     private let daemonQueue = DispatchQueue(label: "com.cscmsg.localflow.daemon")
 
-    private let bufferLock = NSLock()
-    private var buffered: [Float] = []
-
     private var recordingStart: Date?
     private var targetApp: String?
     private var hudTimer: Timer?
@@ -58,18 +55,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             systemSymbolName: "mic", accessibilityDescription: "LocalFlow")
         rebuildMenu()
 
+        Log.write("=== launch: LocalFlow \(Self.version) ===")
+        Log.write("bundle      \(Bundle.main.bundlePath)")
+        Log.write("pid         \(ProcessInfo.processInfo.processIdentifier), ppid \(getppid())")
+        Log.write("accessibility \(AXIsProcessTrusted())")
+        Log.write("mic status  \(Self.micStatusName())")
+
         recorder.prepare()
-        recorder.onChunk = { [weak self] samples in
-            guard let self else { return }
-            self.bufferLock.lock()
-            self.buffered.append(contentsOf: samples)
-            self.bufferLock.unlock()
-        }
 
         // Asked again on first use in beginRecording(). An accessory app's TCC
         // dialog can appear behind other windows and sit there unnoticed, so a
         // launch-time request alone is not enough to rely on.
-        AudioRecorder.requestPermission { _ in }
+        AudioRecorder.requestPermission { granted in
+            Log.write("requestAccess at launch returned granted=\(granted), "
+                      + "status now \(Self.micStatusName())")
+        }
 
         if !HotkeyMonitor.hasAccessibilityPermission {
             HotkeyMonitor.promptForAccessibility()
@@ -94,8 +94,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Recording
 
+    static func micStatusName() -> String {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: return "authorized"
+        case .denied: return "denied"
+        case .restricted: return "restricted"
+        case .notDetermined: return "notDetermined"
+        @unknown default: return "unknown"
+        }
+    }
+
     private func beginRecording() {
         guard recordingStart == nil else { return }
+        Log.write("hotkey pressed; mic status \(Self.micStatusName())")
 
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
@@ -104,8 +115,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Activating puts the permission dialog in front of the user. It
             // steals focus, which normally would break the paste target -- but
             // this branch is not going to paste anything anyway.
+            Log.write("status notDetermined -> activating and requesting access")
             NSApp.activate(ignoringOtherApps: true)
             AudioRecorder.requestPermission { [weak self] granted in
+                Log.write("requestAccess returned granted=\(granted), "
+                          + "status now \(AppDelegate.micStatusName())")
                 self?.hud.show(granted
                     ? .done("Microphone granted — hold the key again")
                     : .failed("Microphone denied — System Settings › Privacy › Microphone"))
@@ -123,11 +137,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // into Slack or into Mail.
         targetApp = NSWorkspace.shared.frontmostApplication?.localizedName
 
-        bufferLock.lock(); buffered.removeAll(); bufferLock.unlock()
-
         do {
             try recorder.start()
+            Log.write("recorder started")
         } catch {
+            Log.write("recorder FAILED to start: \(error.localizedDescription)")
             hud.show(.failed(error.localizedDescription))
             return
         }
@@ -142,6 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func abortRecording() {
         guard recordingStart != nil else { return }
+        _ = recorder.stop()
         teardownRecording()
         hud.hide()
     }
@@ -149,6 +164,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func endRecording() {
         guard let start = recordingStart else { return }
         let held = Date().timeIntervalSince(start)
+        // stop() must be read before teardown -- it is what returns the audio.
+        let samples = recorder.stop()
         teardownRecording()
 
         guard held >= minimumHold else {
@@ -156,11 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        bufferLock.lock()
-        let samples = buffered
-        buffered.removeAll()
-        bufferLock.unlock()
-
+        Log.write("released after \(String(format: "%.2f", held))s, \(samples.count) samples @16kHz")
         guard !samples.isEmpty else {
             hud.show(.failed("No audio captured"))
             return
@@ -192,7 +205,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func teardownRecording() {
-        recorder.stop()
         hudTimer?.invalidate()
         hudTimer = nil
         recordingStart = nil

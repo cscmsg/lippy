@@ -1,33 +1,33 @@
 import AVFoundation
 import Foundation
 
-/// Captures microphone audio and hands it out as 16 kHz mono Float32 --
+/// Captures microphone audio and returns it as 16 kHz mono Float32 --
 /// the format both Parakeet and Whisper want.
 ///
-/// The engine is prepared at launch but only *started* when you hold the key.
-/// That costs ~50ms of start latency, and it is a deliberate trade: leaving the
-/// input node running would keep macOS's orange microphone indicator lit all
-/// day, which is an odd look for a tool whose entire pitch is that it is not
-/// listening to you.
+/// The tap runs at the hardware's native format and the conversion happens once,
+/// on stop. The earlier design converted every 100ms buffer with an
+/// AVAudioConverter and captured *nothing*: a 48 kHz -> 16 kHz resampler needs
+/// several buffers of input before it can emit anything, and an input block that
+/// supplies one buffer and then reports `.noDataNow` makes it return zero frames
+/// forever. It failed silently -- the engine started, the tap fired, and every
+/// converted buffer came back empty.
+///
+/// Doing it this way also means the realtime thread only copies floats.
 final class AudioRecorder {
-    /// Called on a background queue with each converted chunk.
-    var onChunk: (([Float]) -> Void)?
+
+    static let targetSampleRate: Double = 16_000
 
     private let engine = AVAudioEngine()
-    private var converter: AVAudioConverter?
-    private let targetFormat = AVAudioFormat(
-        commonFormat: .pcmFormatFloat32,
-        sampleRate: 16_000,
-        channels: 1,
-        interleaved: false
-    )!
+    private let lock = NSLock()
+    private var captured: [Float] = []
+    private var nativeSampleRate: Double = 0
+    private var tapCallbacks = 0
     private var isRunning = false
 
     func prepare() {
         engine.prepare()
     }
 
-    /// Requests microphone access. The completion runs on the main queue.
     static func requestPermission(_ completion: @escaping (Bool) -> Void) {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
@@ -44,75 +44,126 @@ final class AudioRecorder {
     func start() throws {
         guard !isRunning else { return }
 
+        lock.lock(); captured.removeAll(); tapCallbacks = 0; lock.unlock()
+
         let input = engine.inputNode
-        let inputFormat = input.outputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0 else {
+        let format = input.inputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
             throw RecorderError.noInputDevice
         }
-        guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
-            throw RecorderError.cannotConvert(inputFormat.sampleRate)
-        }
-        self.converter = converter
+        nativeSampleRate = format.sampleRate
+        Log.write("input format \(Int(format.sampleRate)) Hz, \(format.channelCount) ch, "
+                  + "interleaved=\(format.isInterleaved)")
 
-        // 100ms of input per callback: small enough that the daemon receives
-        // audio while you are still talking, large enough not to thrash.
-        let bufferSize = AVAudioFrameCount(inputFormat.sampleRate / 10)
-        input.installTap(onBus: 0, bufferSize: bufferSize, format: inputFormat) { [weak self] buffer, _ in
-            self?.handle(buffer: buffer, using: converter)
+        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+            self?.append(buffer)
         }
 
+        engine.prepare()
         try engine.start()
         isRunning = true
     }
 
-    func stop() {
-        guard isRunning else { return }
+    /// Stops capture and returns everything recorded, as 16 kHz mono.
+    @discardableResult
+    func stop() -> [Float] {
+        guard isRunning else { return [] }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        converter = nil
         isRunning = false
+
+        lock.lock()
+        let native = captured
+        let callbacks = tapCallbacks
+        captured.removeAll()
+        lock.unlock()
+
+        let resampled = Self.resample(native, from: nativeSampleRate)
+        Log.write("captured \(callbacks) buffers, \(native.count) native samples "
+                  + "@\(Int(nativeSampleRate))Hz -> \(resampled.count) @16kHz")
+        return resampled
     }
 
-    private func handle(buffer: AVAudioPCMBuffer, using converter: AVAudioConverter) {
-        let ratio = targetFormat.sampleRate / buffer.format.sampleRate
-        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 64
-        guard let output = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else {
-            return
-        }
+    // MARK: - Capture
 
-        // AVAudioConverter pulls input through this block. Handing it the same
-        // buffer twice would duplicate audio, so the flag ensures one delivery.
-        var delivered = false
-        var error: NSError?
-        converter.convert(to: output, error: &error) { _, status in
-            if delivered {
-                status.pointee = .noDataNow
-                return nil
+    private func append(_ buffer: AVAudioPCMBuffer) {
+        guard let channels = buffer.floatChannelData else { return }
+        let frames = Int(buffer.frameLength)
+        guard frames > 0 else { return }
+        let channelCount = Int(buffer.format.channelCount)
+
+        var mono = [Float](repeating: 0, count: frames)
+        if buffer.format.isInterleaved {
+            // One block with channels interleaved sample by sample.
+            let data = channels[0]
+            for frame in 0..<frames {
+                var sum: Float = 0
+                for channel in 0..<channelCount {
+                    sum += data[frame * channelCount + channel]
+                }
+                mono[frame] = sum / Float(channelCount)
             }
-            delivered = true
-            status.pointee = .haveData
-            return buffer
+        } else {
+            for frame in 0..<frames {
+                var sum: Float = 0
+                for channel in 0..<channelCount {
+                    sum += channels[channel][frame]
+                }
+                mono[frame] = sum / Float(channelCount)
+            }
         }
 
-        if let error {
-            NSLog("LocalFlow: audio conversion failed: \(error.localizedDescription)")
-            return
+        lock.lock()
+        captured.append(contentsOf: mono)
+        tapCallbacks += 1
+        lock.unlock()
+    }
+
+    // MARK: - Resampling
+
+    /// Downsamples to 16 kHz.
+    ///
+    /// For the integer ratios that real hardware produces (48k/3, 32k/2) this
+    /// averages each group of input samples rather than picking one. The average
+    /// is a crude low-pass, which matters: plain decimation folds everything
+    /// above 8 kHz back down into the speech band as aliasing, and sibilants are
+    /// exactly what lands up there.
+    static func resample(_ samples: [Float], from rate: Double) -> [Float] {
+        guard rate > 0, !samples.isEmpty else { return [] }
+        if rate == targetSampleRate { return samples }
+
+        let ratio = rate / targetSampleRate
+        let rounded = ratio.rounded()
+
+        if abs(ratio - rounded) < 1e-9, rounded >= 2 {
+            let factor = Int(rounded)
+            let count = samples.count / factor
+            var output = [Float](repeating: 0, count: count)
+            for i in 0..<count {
+                var sum: Float = 0
+                for j in 0..<factor { sum += samples[i * factor + j] }
+                output[i] = sum / Float(factor)
+            }
+            return output
         }
-        guard output.frameLength > 0, let channel = output.floatChannelData?[0] else { return }
-        onChunk?(Array(UnsafeBufferPointer(start: channel, count: Int(output.frameLength))))
+
+        // Non-integer ratio (44.1 kHz hardware): linear interpolation.
+        let count = Int(Double(samples.count) / ratio)
+        guard count > 0 else { return [] }
+        var output = [Float](repeating: 0, count: count)
+        let last = samples.count - 1
+        for i in 0..<count {
+            let position = Double(i) * ratio
+            let index = min(Int(position), last)
+            let next = min(index + 1, last)
+            let fraction = Float(position - Double(index))
+            output[i] = samples[index] + (samples[next] - samples[index]) * fraction
+        }
+        return output
     }
 
     enum RecorderError: LocalizedError {
         case noInputDevice
-        case cannotConvert(Double)
-
-        var errorDescription: String? {
-            switch self {
-            case .noInputDevice:
-                return "No microphone input device is available."
-            case .cannotConvert(let rate):
-                return "Cannot convert \(Int(rate)) Hz input to 16 kHz."
-            }
-        }
+        var errorDescription: String? { "No microphone input device is available." }
     }
 }
