@@ -3,7 +3,7 @@ import AVFoundation
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
-    static let version = "0.6.0"
+    static let version = "0.7.0"
 
     private let recorder = AudioRecorder()
     private let hud = HUD()
@@ -351,6 +351,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         verbatim.target = self
         menu.addItem(verbatim)
 
+        let loginItem: NSMenuItem
+        switch LoginItem.state {
+        case .enabled:
+            loginItem = NSMenuItem(title: "Start at Login", action: #selector(toggleLoginItem),
+                                   keyEquivalent: "")
+            loginItem.state = .on
+        case .disabled:
+            loginItem = NSMenuItem(title: "Start at Login", action: #selector(toggleLoginItem),
+                                   keyEquivalent: "")
+            loginItem.state = .off
+        case .requiresApproval:
+            // Registered, but switched off by the user in System Settings. The
+            // app cannot re-enable it, so say so rather than showing a tick that
+            // does nothing.
+            loginItem = NSMenuItem(title: "Start at Login — approve in System Settings…",
+                                   action: #selector(openLoginItems), keyEquivalent: "")
+        case .unavailable:
+            loginItem = NSMenuItem(title: "Start at Login (unavailable)", action: nil,
+                                   keyEquivalent: "")
+            loginItem.isEnabled = false
+        }
+        loginItem.target = self
+        menu.addItem(loginItem)
+
         let muteItem = NSMenuItem(title: "Mute Other Audio While Dictating",
                                   action: #selector(toggleMute), keyEquivalent: "")
         muteItem.state = muteWhileDictating ? .on : .off
@@ -426,6 +450,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleMute() { muteWhileDictating.toggle() }
+
+    @objc private func toggleLoginItem() {
+        let wasEnabled = LoginItem.state == .enabled
+        let now = LoginItem.setEnabled(!wasEnabled)
+        rebuildMenu()
+        switch now {
+        case .enabled:
+            hud.show(.done("LocalFlow will start at login"))
+        case .disabled:
+            hud.show(.done("LocalFlow will not start at login"))
+        case .requiresApproval:
+            hud.show(.failed("Approve LocalFlow in System Settings › General › Login Items"))
+            LoginItem.openLoginItemsSettings()
+        case .unavailable:
+            hud.show(.failed("Login items are unavailable for this build"))
+        }
+    }
+
+    @objc private func openLoginItems() {
+        LoginItem.openLoginItemsSettings()
+    }
 
     @objc private func setPolished() { mode = "polish" }
     @objc private func setVerbatim() { mode = "raw" }

@@ -118,6 +118,12 @@ going long.
   and rebinds the key (Right/Left Option, Right Command, Right Control, Right
   Shift, Fn).
 - **Copy Last Transcript** recovers text if a paste went somewhere unexpected.
+- **Start at Login** registers the app as a login item (`SMAppService`), so
+  dictation is available the moment you log in. The daemon already starts on its
+  own — it is a LaunchAgent with `RunAtLoad` — so this is the missing half. The
+  system is the source of truth, not a preference: if you switch it off in
+  System Settings the menu says so rather than showing a tick for something that
+  is disabled.
 - **Mute Other Audio While Dictating** (off by default) silences the default
   output device for the duration of the recording and restores it afterwards.
   Music, a video or a call playing through speakers bleeds into the microphone
