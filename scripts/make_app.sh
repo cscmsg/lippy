@@ -74,16 +74,43 @@ PLIST
 # Sign by certificate hash, not name: this keychain holds two identically-named
 # "Developer ID Application: Courtney Cook" certs, and signing by name fails as
 # ambiguous.
+# Choosing a signing identity.
+#
+# `find-identity | head -1` is wrong on any machine with more than one Developer
+# ID: order is not meaningful, and it silently signed a release with a legacy
+# certificate here. When there is exactly one, use it. When there are several,
+# refuse to guess and make the caller name one -- a build signed with the wrong
+# certificate looks completely normal and is wrong in a way nobody notices until
+# a user's Gatekeeper rejects it.
+#
 # The trailing `|| true` is load-bearing under `set -o pipefail`: with no
-# signing certificate installed, grep exits 1, pipefail propagates it, and the
-# command substitution aborts the whole script -- silently, right after the
-# build succeeds. That made the ad-hoc fallback below unreachable on exactly
-# the machines it exists for, including CI runners.
-IDENTITY="${SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null \
-  | grep -E '"(Developer ID Application|Apple Development)' | head -1 | awk '{print $2}' || true)}"
+# certificate installed grep exits 1, pipefail propagates it, and the command
+# substitution aborts the script -- silently, right after the build succeeds.
+CANDIDATES="$(security find-identity -v -p codesigning 2>/dev/null \
+  | grep -E '"(Developer ID Application|Apple Development)' || true)"
+CANDIDATE_COUNT="$(printf '%s' "$CANDIDATES" | grep -c . || true)"
 
-# --entitlements is not optional here: with --options runtime and no
-# entitlements file, the hardened runtime silently blocks the microphone.
+# A gitignored .signing-identity file lets a maintainer record their choice
+# once, without putting a machine-specific certificate hash in a public repo.
+if [ -z "${SIGN_IDENTITY:-}" ] && [ -f .signing-identity ]; then
+  SIGN_IDENTITY="$(tr -d '[:space:]' < .signing-identity)"
+fi
+
+if [ -n "${SIGN_IDENTITY:-}" ]; then
+  IDENTITY="$SIGN_IDENTITY"
+elif [ "$CANDIDATE_COUNT" = "1" ]; then
+  IDENTITY="$(printf '%s' "$CANDIDATES" | awk '{print $2}')"
+elif [ "${CANDIDATE_COUNT:-0}" -gt 1 ]; then
+  echo "Multiple signing identities found; refusing to pick one:" >&2
+  printf '%s\n' "$CANDIDATES" | sed 's/^/    /' >&2
+  echo >&2
+  echo "Set SIGN_IDENTITY to the hash of the one you want, e.g.:" >&2
+  echo "    SIGN_IDENTITY=<hash> $0" >&2
+  exit 1
+else
+  IDENTITY=""
+fi
+
 if [ -n "${IDENTITY:-}" ]; then
   codesign --force --options runtime \
     --entitlements app/LocalFlow.entitlements --sign "$IDENTITY" "$APP"

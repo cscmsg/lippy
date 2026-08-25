@@ -232,6 +232,29 @@ $VENV/bin/python daemon/flowctl.py last              # recent utterances
 if the polish pass fell back — that separation is usually enough to tell whether
 a bad result came from mishearing or from over-editing.
 
+## Releasing
+
+Tag a version and the workflow builds, signs, notarises, staples and publishes:
+
+```
+git tag v0.9.0 && git push origin v0.9.0
+```
+
+That needs six repository secrets. `./scripts/set-release-secrets.sh <owner/repo>`
+sets them: values go from your keychain export and password manager straight
+into `gh`, piped rather than passed as arguments, so they never reach your shell
+history or the process list. Without them the workflow still builds, but ad-hoc
+signs — Gatekeeper rejects the result, so it is not distributable.
+
+For local builds, `make_app.sh` will not guess between multiple signing
+identities: order in `security find-identity` is not meaningful, and picking the
+first one silently signed a release here with a legacy certificate. Record your
+choice once in a gitignored file:
+
+```
+echo <identity-hash> > .signing-identity
+```
+
 ## Tests
 
 ```
