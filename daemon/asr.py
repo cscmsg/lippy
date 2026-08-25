@@ -43,7 +43,6 @@ class ParakeetBackend:
     """NVIDIA Parakeet TDT via MLX. English-strong, 25 languages, CC-BY-4.0."""
 
     name = "parakeet"
-    supports_streaming = True
 
     def __init__(self, model_id: str = "mlx-community/parakeet-tdt-0.6b-v3") -> None:
         from parakeet_mlx import from_pretrained
@@ -75,18 +74,6 @@ class ParakeetBackend:
         text = "" if _is_silence(pcm, duration) else self._transcribe_array(pcm)
         return Transcript(text, duration, time.perf_counter() - t0)
 
-    def stream(self):
-        """Open a streaming session for the live preview.
-
-        This drives the HUD only. The text delivered at the end still comes from
-        a full-context pass over the whole utterance, because a streaming
-        decoder sees a limited window and is measurably worse at exactly the
-        things that matter -- long-range agreement, and words whose
-        disambiguation arrives later in the sentence. Showing you a preview is
-        not worth degrading what actually lands at your cursor.
-        """
-        return self._model.transcribe_stream(context_size=(256, 256))
-
 
 class WhisperBackend:
     """OpenAI Whisper large-v3-turbo via MLX. Broader language coverage.
@@ -98,7 +85,6 @@ class WhisperBackend:
     """
 
     name = "whisper"
-    supports_streaming = False
 
     def __init__(self, model_id: str = "mlx-community/whisper-large-v3-turbo") -> None:
         self.model_id = model_id

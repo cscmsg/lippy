@@ -1,13 +1,11 @@
 import AVFoundation
 import Foundation
 
-/// Captures microphone audio and emits it as 16 kHz mono Float32 --
+/// Captures microphone audio and returns it as 16 kHz mono Float32 --
 /// the format both Parakeet and Whisper want.
 ///
-/// Audio is emitted in chunks *while* you speak, so the daemon can run a live
-/// preview. The tap itself runs at the hardware's native format and does
-/// nothing but copy floats; resampling happens off the realtime thread, in
-/// blocks, as they fill.
+/// The tap runs at the hardware's native format and does nothing but copy
+/// floats; the conversion happens once, on stop, off the realtime thread.
 ///
 /// An earlier design converted every tap buffer with an AVAudioConverter and
 /// captured *nothing*: a 48 kHz -> 16 kHz resampler needs several buffers
@@ -18,21 +16,11 @@ final class AudioRecorder {
 
     static let targetSampleRate: Double = 16_000
 
-    /// Half a second of 16 kHz audio per chunk. Measured: the streaming decoder
-    /// takes ~220ms to ingest 1s of audio, so per-chunk overhead dominates if
-    /// you send every ~85ms tap buffer, and the preview falls behind realtime.
-    /// Half a second keeps it comfortably ahead and still updates twice a second.
-    private static let chunkFrames = 8_000
-
-    /// Called off the realtime thread with each 16 kHz chunk as it fills.
-    var onChunk: (([Float]) -> Void)?
-
     private let engine = AVAudioEngine()
     private let lock = NSLock()
-    private var pendingNative: [Float] = []
+    private var captured: [Float] = []
     private var nativeSampleRate: Double = 0
     private var tapCallbacks = 0
-    private var emittedFrames = 0
     private var isRunning = false
 
     static func requestPermission(_ completion: @escaping (Bool) -> Void) {
@@ -51,11 +39,7 @@ final class AudioRecorder {
     func start() throws {
         guard !isRunning else { return }
 
-        lock.lock()
-        pendingNative.removeAll()
-        tapCallbacks = 0
-        emittedFrames = 0
-        lock.unlock()
+        lock.lock(); captured.removeAll(); tapCallbacks = 0; lock.unlock()
 
         let input = engine.inputNode
         let format = input.inputFormat(forBus: 0)
@@ -75,7 +59,7 @@ final class AudioRecorder {
         isRunning = true
     }
 
-    /// Stops capture and returns the tail -- whatever had not yet filled a chunk.
+    /// Stops capture and returns everything recorded, as 16 kHz mono.
     @discardableResult
     func stop() -> [Float] {
         guard isRunning else { return [] }
@@ -84,16 +68,15 @@ final class AudioRecorder {
         isRunning = false
 
         lock.lock()
-        let remainder = pendingNative
-        pendingNative.removeAll()
+        let native = captured
         let callbacks = tapCallbacks
-        let emitted = emittedFrames
+        captured.removeAll()
         lock.unlock()
 
-        let tail = Self.resample(remainder, from: nativeSampleRate)
-        Log.write("captured \(callbacks) buffers @\(Int(nativeSampleRate))Hz -> "
-                  + "\(emitted) streamed + \(tail.count) tail = \(emitted + tail.count) @16kHz")
-        return tail
+        let resampled = Self.resample(native, from: nativeSampleRate)
+        Log.write("captured \(callbacks) buffers, \(native.count) native samples "
+                  + "@\(Int(nativeSampleRate))Hz -> \(resampled.count) @16kHz")
+        return resampled
     }
 
     // MARK: - Capture
@@ -120,29 +103,10 @@ final class AudioRecorder {
             }
         }
 
-        var ready: [[Float]] = []
-        let blockSize = Self.nativeBlockSize(for: nativeSampleRate)
-
         lock.lock()
-        pendingNative.append(contentsOf: mono)
+        captured.append(contentsOf: mono)
         tapCallbacks += 1
-        while pendingNative.count >= blockSize {
-            let block = Array(pendingNative[0..<blockSize])
-            pendingNative.removeFirst(blockSize)
-            let chunk = Self.resample(block, from: nativeSampleRate)
-            emittedFrames += chunk.count
-            ready.append(chunk)
-        }
         lock.unlock()
-
-        // Emit outside the lock: the callback writes to a socket.
-        for chunk in ready { onChunk?(chunk) }
-    }
-
-    /// How many native samples make one 16 kHz chunk.
-    private static func nativeBlockSize(for rate: Double) -> Int {
-        guard rate > 0 else { return chunkFrames }
-        return max(1, Int((rate / targetSampleRate).rounded() * Double(chunkFrames)))
     }
 
     // MARK: - Resampling
@@ -154,10 +118,6 @@ final class AudioRecorder {
     /// is a crude low-pass, which matters: plain decimation folds everything
     /// above 8 kHz back into the speech band as aliasing, and sibilants are
     /// exactly what lands up there.
-    ///
-    /// Chunk boundaries are exact for integer ratios. At 44.1 kHz each block is
-    /// interpolated independently, which leaves a sub-sample seam per chunk --
-    /// inaudible, and it reaches the model as a rounding difference.
     static func resample(_ samples: [Float], from rate: Double) -> [Float] {
         guard rate > 0, !samples.isEmpty else { return [] }
         if rate == targetSampleRate { return samples }
@@ -178,6 +138,7 @@ final class AudioRecorder {
             return output
         }
 
+        // Non-integer ratio (44.1 kHz hardware): linear interpolation.
         let count = Int(Double(samples.count) / ratio)
         guard count > 0 else { return [] }
         var output = [Float](repeating: 0, count: count)

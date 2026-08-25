@@ -26,9 +26,8 @@ launched from a venv does not.
 ```
 hold Right Option
    ↓  AVAudioEngine → 16 kHz mono Float32
-   ↓  unix socket (newline-delimited JSON, base64 PCM), 0.5s chunks
-   ↓  Parakeet streaming decoder            live preview in the HUD
-   ↓  Parakeet TDT 0.6B v3          ~200ms   speech → text (full context)
+   ↓  unix socket (newline-delimited JSON, base64 PCM)
+   ↓  Parakeet TDT 0.6B v3          ~200ms   speech → text
    ↓  deterministic rules             <1ms   fillers, stutters, dictionary
    ↓  Qwen3-4B-Instruct              ~900ms  punctuation, grammar, false starts
    ↓  guardrails                            reject or accept the model's work
@@ -47,32 +46,6 @@ transcribe to `""`.
 
 Parakeet TDT 0.6B v3 — NVIDIA, CC-BY-4.0, 25 languages, 2.51 GB, ~1.9% WER on
 LibriSpeech clean, and ~40× realtime on an M4 Pro.
-
-### Why the preview never becomes the output
-
-Audio streams to the daemon in 0.5s chunks while you speak, and a Parakeet
-streaming decoder turns them into the running text in the HUD. That preview is
-cosmetic. The text delivered at your cursor comes from a second, full-context
-pass over the whole utterance once you stop.
-
-That is not caution for its own sake — it is measurable. On the same recording:
-
-```
-last partial : "So why I think we should ship the Lex Cloak update..."
-final        : "So I think we should ship the Lex Cloak update..."
-```
-
-A streaming decoder sees a limited window, so it commits early to words whose
-disambiguation arrives later in the sentence. Showing you a preview is not worth
-degrading what actually lands in your message.
-
-Chunks are 0.5s because the streaming decoder takes ~220ms to ingest 1s of
-audio. Sending every ~85ms tap buffer makes per-chunk overhead dominate and the
-preview falls behind realtime; half a second stays well ahead and still updates
-twice a second. If the preview fails for any reason the daemon drops it and
-keeps recording — losing the words someone is mid-sentence through to salvage a
-HUD animation would be a poor trade. Turn it off with
-`"streaming_preview": false`.
 
 ### Why the LLM pass is on a leash
 
@@ -214,6 +187,18 @@ Scoped out of v1 deliberately:
 - **Learned dictionary** — corrections are hand-added to `config.json`.
 
 ## Declined
+
+**Live transcription preview** (words appearing in the HUD as you speak) — built
+in v0.3.0, removed in v0.4.0 after use. It was not a rendering problem that
+could be polished away.
+
+A streaming decoder continuously **revises its own hypothesis**, so displayed
+text rewrites itself mid-sentence: you cannot tell what is settled from what is
+still moving. Same mechanism that made a partial read *"So why I think"* where
+the full pass read *"So I think"*. Making it flow like subtitles would require
+holding back unstable text, which adds latency to a preview whose whole value
+was immediacy. It is also unreadable while speaking, which is the only time it
+is on screen. Wispr Flow does not show midway text either.
 
 **Command mode** (select text, hold the key, say *"make this shorter"*) — decided
 against on 2026-08-24, not deferred. The operator never used it in Wispr Flow and

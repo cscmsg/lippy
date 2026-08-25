@@ -54,8 +54,7 @@ def load_wav(path: pathlib.Path) -> np.ndarray:
     return pcm
 
 
-def send_audio(sock: socket.socket, pcm: np.ndarray, mode: str, app: str | None,
-               on_partial=None) -> dict:
+def send_audio(sock: socket.socket, pcm: np.ndarray, mode: str, app: str | None) -> dict:
     protocol.send(sock, {"type": "start", "mode": mode, "app": app})
     stream = protocol.messages(sock)
     next(stream)  # the "ready" acknowledgement
@@ -66,15 +65,11 @@ def send_audio(sock: socket.socket, pcm: np.ndarray, mode: str, app: str | None,
                              "pcm": protocol.encode_pcm(pcm[start:start + SAMPLE_RATE])})
     protocol.send(sock, {"type": "stop"})
 
-    # Live-preview partials arrive interleaved and are buffered by the socket
-    # while we are writing. Drain them: the first message after "stop" is a
-    # partial far more often than it is the result.
+    # Skip anything that is not the result, rather than assuming the next
+    # message is one.
     for message in stream:
-        if message.get("type") == "partial":
-            if on_partial:
-                on_partial(message["text"])
-            continue
-        return message
+        if message.get("type") == "result":
+            return message
     raise SystemExit("daemon closed the connection before returning a result")
 
 
@@ -88,10 +83,8 @@ def cmd_status(args) -> int:
 def cmd_file(args) -> int:
     pcm = load_wav(args.path)
     sock = connect(args.socket)
-    partials: list[str] = []
     t0 = time.perf_counter()
-    result = send_audio(sock, pcm, "raw" if args.raw else "polish", args.app,
-                        on_partial=partials.append)
+    result = send_audio(sock, pcm, "raw" if args.raw else "polish", args.app)
     wall = time.perf_counter() - t0
 
     if args.json:
@@ -103,8 +96,6 @@ def cmd_file(args) -> int:
     print(f"polish     {result['polish_ms']}ms"
           + ("" if result["used_llm"] else f"  (fell back: {result['fallback_reason']})"))
     print(f"round trip {wall * 1000:.0f}ms\n")
-    if partials:
-        print(f"partials   {len(partials)} previews, last: {partials[-1]!r}")
     print(f"raw    : {result['raw']}")
     print(f"final  : {result['text']}")
     return 0

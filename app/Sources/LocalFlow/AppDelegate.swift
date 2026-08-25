@@ -3,7 +3,7 @@ import AVFoundation
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
-    static let version = "0.3.0"
+    static let version = "0.4.0"
 
     private let recorder = AudioRecorder()
     private let hud = HUD()
@@ -15,11 +15,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// whatever app the user is typing into.
     private let daemonQueue = DispatchQueue(label: "com.cscmsg.localflow.daemon")
 
-    /// Owned by daemonQueue. Never touch these from the main thread.
-    private var client: DaemonClient?
-    private var sessionActive = false
-
-    private var partialText = ""
     private var recordingStart: Date?
     private var isLatched = false
     private var targetApp: String?
@@ -98,21 +93,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // which reads as "the app is broken" rather than "one call failed".
         // Ordering it this way means an audio failure costs audio, not the
         // entire interface.
-        // Chunks arrive off the realtime thread while recording; hand each one
-        // to the daemon so it can run the live preview.
-        recorder.onChunk = { [weak self] chunk in
-            guard let self else { return }
-            self.daemonQueue.async {
-                guard self.sessionActive, let client = self.client else { return }
-                do {
-                    try client.sendAudio(chunk)
-                } catch {
-                    Log.write("audio send failed: \(error.localizedDescription)")
-                    self.sessionActive = false
-                }
-            }
-        }
-
         installHotkey()
         Log.write("hotkey installed")
 
@@ -200,69 +180,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         isLatched = latched
-        partialText = ""
         recordingStart = Date()
-        openSession(mode: mode, app: targetApp)
 
-        hud.show(.recording(seconds: 0, latched: latched, partial: ""))
+        hud.show(.recording(seconds: 0, latched: latched))
         hudTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             guard let self, let start = self.recordingStart else { return }
             self.hud.show(.recording(seconds: Date().timeIntervalSince(start),
-                                     latched: self.isLatched, partial: self.partialText))
+                                     latched: self.isLatched))
         }
         if latched { startLatchCap() }
-    }
-
-    // MARK: - Daemon session
-
-    /// Opens the connection at the start of capture so audio can stream while
-    /// you are still speaking.
-    private func openSession(mode: String, app: String?) {
-        daemonQueue.async { [weak self] in
-            guard let self else { return }
-            let client = DaemonClient(socketPath: self.socketPath)
-            do {
-                try client.connect()
-                try client.startUtterance(mode: mode, app: app)
-                self.client = client
-                self.sessionActive = true
-                client.startReader(
-                    onPartial: { text in
-                        DispatchQueue.main.async { self.partialText = text }
-                    },
-                    onResult: { outcome in
-                        DispatchQueue.main.async { self.handleResult(outcome) }
-                    })
-            } catch {
-                Log.write("daemon connect failed: \(error.localizedDescription)")
-                self.sessionActive = false
-                self.client = nil
-                DispatchQueue.main.async {
-                    self.hud.show(.failed(error.localizedDescription))
-                }
-            }
-        }
-    }
-
-    private func closeSession(cancel: Bool = false) {
-        daemonQueue.async { [weak self] in
-            guard let self else { return }
-            if cancel, self.sessionActive { self.client?.cancel() }
-            self.sessionActive = false
-            self.client?.disconnect()
-            self.client = nil
-        }
-    }
-
-    private func handleResult(_ outcome: Swift.Result<DaemonClient.Result, Error>) {
-        closeSession()
-        switch outcome {
-        case .success(let result):
-            deliver(result)
-        case .failure(let error):
-            Log.write("daemon error: \(error.localizedDescription)")
-            hud.show(.failed(error.localizedDescription))
-        }
     }
 
     /// The primary key was already held when the latch modifier arrived. Keep
@@ -289,7 +215,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard recordingStart != nil else { return }
         Log.write("capture aborted (another key was pressed mid-hold)")
         _ = recorder.stop()
-        closeSession(cancel: true)
         teardownRecording()
         hud.hide()
     }
@@ -304,30 +229,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard latched || held >= minimumHold else {
             Log.write("ignored \(String(format: "%.2f", held))s hold (below minimum)")
-            closeSession(cancel: true)
             hud.hide()
             return
         }
 
-        Log.write("capture end after \(String(format: "%.2f", held))s (latched=\(latched))")
-        hud.show(.thinking)
+        Log.write("capture end after \(String(format: "%.2f", held))s"
+                  + " (latched=\(latched)), \(samples.count) samples @16kHz")
+        guard !samples.isEmpty else {
+            hud.show(.failed("No audio captured"))
+            return
+        }
 
-        // `samples` is only the tail -- everything before it already streamed.
+        hud.show(.thinking)
+        let mode = self.mode
+        let app = self.targetApp
+
         daemonQueue.async { [weak self] in
             guard let self else { return }
-            guard self.sessionActive, let client = self.client else {
-                DispatchQueue.main.async { self.hud.show(.failed("No daemon session")) }
-                return
-            }
+            let client = DaemonClient(socketPath: self.socketPath)
             do {
-                if !samples.isEmpty { try client.sendAudio(samples) }
-                try client.requestStop()   // the result arrives on the reader thread
+                try client.connect()
+                defer { client.disconnect() }
+                try client.startUtterance(mode: mode, app: app)
+                for chunk in stride(from: 0, to: samples.count, by: 16_000) {
+                    try client.sendAudio(Array(samples[chunk..<min(chunk + 16_000, samples.count)]))
+                }
+                let result = try client.finish()
+                DispatchQueue.main.async { self.deliver(result) }
             } catch {
                 Log.write("daemon error: \(error.localizedDescription)")
-                self.sessionActive = false
-                DispatchQueue.main.async {
-                    self.hud.show(.failed(error.localizedDescription))
-                }
+                DispatchQueue.main.async { self.hud.show(.failed(error.localizedDescription)) }
             }
         }
     }
