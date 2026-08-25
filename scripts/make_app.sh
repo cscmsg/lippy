@@ -16,6 +16,14 @@ swift build -c release --package-path app
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+
+# Keep the build artifact out of Spotlight. Without this, `build/LocalFlow.app`
+# and the installed `~/Applications/LocalFlow.app` both appear in Spotlight with
+# the same name, icon and bundle id, and there is no way to tell from the
+# results which one you are about to launch. Launching the build copy works but
+# is the wrong habit: it goes stale the moment you install without rebuilding.
+# A .metadata_never_index marker needs no admin rights, unlike mdutil.
+touch build/.metadata_never_index
 cp app/.build/release/LocalFlow "$APP/Contents/MacOS/LocalFlow"
 [ -f Assets/AppIcon.icns ] && cp Assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
