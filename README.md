@@ -118,6 +118,14 @@ going long.
   and rebinds the key (Right/Left Option, Right Command, Right Control, Right
   Shift, Fn).
 - **Copy Last Transcript** recovers text if a paste went somewhere unexpected.
+- **Mute Other Audio While Dictating** (off by default) silences the default
+  output device for the duration of the recording and restores it afterwards.
+  Music, a video or a call playing through speakers bleeds into the microphone
+  and contaminates the transcript. It is opt-in because muting the machine is a
+  side effect that should be asked for — sometimes you dictate a note while
+  deliberately listening to something. If the output was already muted, it is
+  left alone rather than helpfully unmuted afterwards. Devices with no mute
+  control (HDMI, some external DACs) fall back to zeroing per-channel volume.
 
 ### When there is nowhere to paste
 

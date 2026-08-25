@@ -3,7 +3,7 @@ import AVFoundation
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
 
-    static let version = "0.5.0"
+    static let version = "0.6.0"
 
     private let recorder = AudioRecorder()
     private let hud = HUD()
@@ -56,6 +56,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             installHotkey()
             rebuildMenu()
         }
+    }
+
+    /// Off by default: muting the machine is a side effect that should be asked
+    /// for, not assumed. Sometimes you dictate a note while deliberately
+    /// listening to something.
+    private var muteWhileDictating: Bool {
+        get { UserDefaults.standard.bool(forKey: "muteWhileDictating") }
+        set { UserDefaults.standard.set(newValue, forKey: "muteWhileDictating"); rebuildMenu() }
     }
 
     private var latchChoice: HotkeyMonitor.Key? {
@@ -112,6 +120,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         hotkey?.stop()
         _ = recorder.stop()
+        // Quitting mid-recording must not leave the machine muted.
+        SystemAudio.restoreIfMuted()
     }
 
     private func installHotkey() {
@@ -172,10 +182,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // into Slack or into Mail.
         targetApp = NSWorkspace.shared.frontmostApplication?.localizedName
 
+        if muteWhileDictating { SystemAudio.muteIfPossible() }
+
         do {
             try recorder.start()
             Log.write("recorder started")
         } catch {
+            // Put the sound back before bailing out, or the machine stays
+            // silent because a recording never started.
+            SystemAudio.restoreIfMuted()
             Log.write("recorder FAILED to start: \(error.localizedDescription)")
             hud.show(.failed(error.localizedDescription))
             return
@@ -273,6 +288,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func teardownRecording() {
+        // Every path out of recording comes through here, which is what makes
+        // this the safe place to restore audio -- abort, normal end, and the
+        // latch cap all land on it.
+        SystemAudio.restoreIfMuted()
         hudTimer?.invalidate()
         hudTimer = nil
         latchCapTimer?.invalidate()
@@ -331,6 +350,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         verbatim.state = mode == "raw" ? .on : .off
         verbatim.target = self
         menu.addItem(verbatim)
+
+        let muteItem = NSMenuItem(title: "Mute Other Audio While Dictating",
+                                  action: #selector(toggleMute), keyEquivalent: "")
+        muteItem.state = muteWhileDictating ? .on : .off
+        muteItem.target = self
+        menu.addItem(muteItem)
 
         menu.addItem(.separator())
 
@@ -399,6 +424,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem?.menu = menu
     }
+
+    @objc private func toggleMute() { muteWhileDictating.toggle() }
 
     @objc private func setPolished() { mode = "polish" }
     @objc private func setVerbatim() { mode = "raw" }
