@@ -9,6 +9,11 @@ if arguments.contains("--selftest") {
     exit(SelfTest.run(path: path))
 }
 
+if arguments.contains("--diagnose") {
+    // Turns four silent failure modes into four lines of output.
+    exit(Diagnose.run())
+}
+
 if arguments.contains("--version") {
     print("LocalFlow \(AppDelegate.version)")
     exit(0)
