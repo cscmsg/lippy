@@ -8,12 +8,12 @@ import os
 import pathlib
 from dataclasses import asdict, dataclass, field
 
-log = logging.getLogger("localflow.config")
+log = logging.getLogger("lippy.config")
 
-SUPPORT_DIR = pathlib.Path.home() / "Library" / "Application Support" / "LocalFlow"
+SUPPORT_DIR = pathlib.Path.home() / "Library" / "Application Support" / "Lippy"
 CONFIG_PATH = SUPPORT_DIR / "config.json"
-SOCKET_PATH = SUPPORT_DIR / "flowd.sock"
-LOG_PATH = SUPPORT_DIR / "flowd.log"
+SOCKET_PATH = SUPPORT_DIR / "lippyd.sock"
+LOG_PATH = SUPPORT_DIR / "lippyd.log"
 
 # Empty by design. This is where proper nouns the speech model has never seen
 # get corrected -- names, acronyms, jargon, product names. Add your own to
@@ -54,7 +54,7 @@ class Config:
     dictionary: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_DICTIONARY))
 
     # Utterances kept in memory so a failed paste is recoverable via
-    # `flowctl last`. Deliberately never written to disk: dictation is the most
+    # `lippyctl last`. Deliberately never written to disk: dictation is the most
     # sensitive text on the machine, and a plaintext log of it is a liability
     # that a local-first tool has no reason to create.
     history_size: int = 20
@@ -119,4 +119,4 @@ class Config:
 
 
 def socket_path() -> pathlib.Path:
-    return pathlib.Path(os.environ.get("LOCALFLOW_SOCKET", SOCKET_PATH))
+    return pathlib.Path(os.environ.get("LIPPY_SOCKET", SOCKET_PATH))

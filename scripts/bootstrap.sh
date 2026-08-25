@@ -5,13 +5,13 @@ set -euo pipefail
 # MLX is Metal and unified-memory based; there is no Intel path. Without this
 # check an Intel Mac fails deep inside a pip build with an unreadable error.
 if [ "$(uname -m)" != "arm64" ]; then
-  echo "LocalFlow requires an Apple Silicon Mac (M1 or later)." >&2
+  echo "Lippy requires an Apple Silicon Mac (M1 or later)." >&2
   echo "This machine reports: $(uname -m)" >&2
   exit 1
 fi
 
-VENV="${LOCALFLOW_VENV:-$HOME/.cache/localflow-venv}"
-PYTHON="${LOCALFLOW_PYTHON:-/opt/homebrew/bin/python3.12}"
+VENV="${LIPPY_VENV:-$HOME/.cache/lippy-venv}"
+PYTHON="${LIPPY_PYTHON:-/opt/homebrew/bin/python3.12}"
 
 if [ ! -d "$VENV" ]; then
   echo "creating venv at $VENV"

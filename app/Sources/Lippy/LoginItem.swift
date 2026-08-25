@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import ServiceManagement
 
-/// Registers LocalFlow as a login item, so dictation is available from the
+/// Registers Lippy as a login item, so dictation is available from the
 /// moment you log in without remembering to launch anything.
 ///
 /// The daemon already starts on its own -- it is a LaunchAgent with RunAtLoad --

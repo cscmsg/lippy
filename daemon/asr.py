@@ -20,7 +20,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-log = logging.getLogger("localflow.asr")
+log = logging.getLogger("lippy.asr")
 
 SAMPLE_RATE = 16_000
 
@@ -97,8 +97,8 @@ class SherpaBackend:
 
         directory = pathlib.Path(
             model_dir
-            or os.environ.get("LOCALFLOW_ONNX_MODEL_DIR")
-            or pathlib.Path.home() / ".cache" / "localflow-onnx"
+            or os.environ.get("LIPPY_ONNX_MODEL_DIR")
+            or pathlib.Path.home() / ".cache" / "lippy-onnx"
             / "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
         )
         if not directory.is_dir():

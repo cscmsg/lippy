@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Command-line client for the LocalFlow daemon.
+"""Command-line client for the Lippy daemon.
 
 Exists so the whole pipeline can be exercised, timed and debugged without the
 menu-bar app in the way. If dictation is producing bad text, run the same audio
-through `flowctl file` and you can see the raw ASR output separately from the
+through `lippyctl file` and you can see the raw ASR output separately from the
 polished output, and whether the guardrails fired.
 """
 
@@ -116,7 +116,7 @@ def cmd_last(args) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="LocalFlow CLI")
+    parser = argparse.ArgumentParser(description="Lippy CLI")
     parser.add_argument("--socket", type=pathlib.Path, default=config_mod.socket_path())
     sub = parser.add_subparsers(dest="command", required=True)
 

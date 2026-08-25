@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-/// Talks to flowd over a unix domain socket using newline-delimited JSON.
+/// Talks to lippyd over a unix domain socket using newline-delimited JSON.
 ///
 /// One connection per utterance. The daemon keeps its recording state per
 /// connection, so a fresh socket is also a clean slate -- if anything goes
@@ -25,7 +25,7 @@ final class DaemonClient {
         var errorDescription: String? {
             switch self {
             case .cannotConnect(let path):
-                return "Can't reach the LocalFlow daemon at \(path). Is it running?"
+                return "Can't reach the Lippy daemon at \(path). Is it running?"
             case .socketClosed:
                 return "The daemon closed the connection unexpectedly."
             case .daemon(let message):

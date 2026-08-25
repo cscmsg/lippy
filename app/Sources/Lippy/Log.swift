@@ -1,6 +1,6 @@
 import Foundation
 
-/// Appends to `~/Library/Application Support/LocalFlow/app.log`.
+/// Appends to `~/Library/Application Support/Lippy/app.log`.
 ///
 /// NSLog goes to the unified system log, which `log stream` reads -- and this
 /// account is not an admin, so `log stream` is unavailable. Without a file the
@@ -9,12 +9,12 @@ import Foundation
 enum Log {
     private static let url: URL = {
         let dir = URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Application Support/LocalFlow")
+            .appendingPathComponent("Library/Application Support/Lippy")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir.appendingPathComponent("app.log")
     }()
 
-    private static let queue = DispatchQueue(label: "com.cscmsg.localflow.log")
+    private static let queue = DispatchQueue(label: "com.cscmsg.lippy.log")
 
     private static let formatter: DateFormatter = {
         let f = DateFormatter()

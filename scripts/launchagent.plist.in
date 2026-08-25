@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>com.cscmsg.localflow.flowd</string>
+	<string>com.cscmsg.lippy.lippyd</string>
 	<key>ProgramArguments</key>
 	<array>
 		<string>@PYTHON@</string>
-		<string>@REPO@/daemon/flowd.py</string>
+		<string>@REPO@/daemon/lippyd.py</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
@@ -19,8 +19,8 @@
 	<key>ProcessType</key>
 	<string>Interactive</string>
 	<key>StandardOutPath</key>
-	<string>@HOME@/Library/Application Support/LocalFlow/flowd.out.log</string>
+	<string>@HOME@/Library/Application Support/Lippy/lippyd.out.log</string>
 	<key>StandardErrorPath</key>
-	<string>@HOME@/Library/Application Support/LocalFlow/flowd.err.log</string>
+	<string>@HOME@/Library/Application Support/Lippy/lippyd.err.log</string>
 </dict>
 </plist>

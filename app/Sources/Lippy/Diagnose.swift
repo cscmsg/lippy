@@ -1,7 +1,7 @@
 import AVFoundation
 import AppKit
 
-/// `LocalFlow --diagnose` -- prints every precondition the app depends on.
+/// `Lippy --diagnose` -- prints every precondition the app depends on.
 ///
 /// The failure modes here are all silent: without Accessibility, macOS delivers
 /// no global key events and the hotkey simply never fires; without Microphone,
@@ -25,12 +25,12 @@ enum Diagnose {
         // from a shell is the terminal, not this app. Run that way, the
         // microphone line reports the terminal's access and can read "granted"
         // while the real app is denied. Launched by LaunchServices the parent
-        // is launchd, and the answer is about LocalFlow itself.
+        // is launchd, and the answer is about Lippy itself.
         let guiLaunched = getppid() == 1
-        print("LocalFlow \(AppDelegate.version)\n")
+        print("Lippy \(AppDelegate.version)\n")
         if !guiLaunched {
             print("  ⚠︎  Run from a shell — the Microphone line below describes the")
-            print("      launching process, not LocalFlow. Use the app's menu bar")
+            print("      launching process, not Lippy. Use the app's menu bar")
             print("      item for the truth about its own permissions.\n")
         }
 
@@ -68,7 +68,7 @@ enum Diagnose {
         }
 
         let socketPath = (NSHomeDirectory() as NSString)
-            .appendingPathComponent("Library/Application Support/LocalFlow/flowd.sock")
+            .appendingPathComponent("Library/Application Support/Lippy/lippyd.sock")
         let daemonUp = DaemonClient(socketPath: socketPath).probe()
         report("Daemon", daemonUp,
                daemonUp ? "ready at \(socketPath)"

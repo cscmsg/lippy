@@ -14,7 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// All daemon I/O happens here. The socket calls block, so none of this may
     /// touch the main thread -- a stalled daemon must never freeze the UI of
     /// whatever app the user is typing into.
-    private let daemonQueue = DispatchQueue(label: "com.cscmsg.localflow.daemon")
+    private let daemonQueue = DispatchQueue(label: "com.cscmsg.lippy.daemon")
 
     private var recordingStart: Date?
     private var noDestinationAtStart = false
@@ -34,7 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var socketPath: String {
         (NSHomeDirectory() as NSString)
-            .appendingPathComponent("Library/Application Support/LocalFlow/flowd.sock")
+            .appendingPathComponent("Library/Application Support/Lippy/lippyd.sock")
     }
 
     // MARK: - Settings
@@ -85,10 +85,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem?.button?.image = NSImage(
-            systemSymbolName: "mic", accessibilityDescription: "LocalFlow")
+            systemSymbolName: "mic", accessibilityDescription: "Lippy")
         rebuildMenu()
 
-        Log.write("=== launch: LocalFlow \(Self.version) ===")
+        Log.write("=== launch: Lippy \(Self.version) ===")
         Log.write("bundle        \(Bundle.main.bundlePath)")
         Log.write("pid           \(ProcessInfo.processInfo.processIdentifier), ppid \(getppid())")
         Log.write("accessibility \(AXIsProcessTrusted())")
@@ -332,7 +332,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func rebuildMenu() {
         let menu = NSMenu()
 
-        var title = "LocalFlow \(Self.version) — hold \(hotkeyChoice.displayName)"
+        var title = "Lippy \(Self.version) — hold \(hotkeyChoice.displayName)"
         if let latch = latchChoice {
             title += " · +\(latch.displayName) to latch"
         }
@@ -451,7 +451,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(logItem)
 
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit LocalFlow",
+        menu.addItem(NSMenuItem(title: "Quit Lippy",
                                 action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
         statusItem?.menu = menu
@@ -465,11 +465,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
         switch now {
         case .enabled:
-            hud.show(.done("LocalFlow will start at login"))
+            hud.show(.done("Lippy will start at login"))
         case .disabled:
-            hud.show(.done("LocalFlow will not start at login"))
+            hud.show(.done("Lippy will not start at login"))
         case .requiresApproval:
-            hud.show(.failed("Approve LocalFlow in System Settings › General › Login Items"))
+            hud.show(.failed("Approve Lippy in System Settings › General › Login Items"))
             LoginItem.openLoginItemsSettings()
         case .unavailable:
             hud.show(.failed("Login items are unavailable for this build"))
@@ -530,11 +530,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openConfig() {
         NSWorkspace.shared.open(URL(fileURLWithPath: (NSHomeDirectory() as NSString)
-            .appendingPathComponent("Library/Application Support/LocalFlow/config.json")))
+            .appendingPathComponent("Library/Application Support/Lippy/config.json")))
     }
 
     @objc private func openLog() {
         NSWorkspace.shared.open(URL(fileURLWithPath: (NSHomeDirectory() as NSString)
-            .appendingPathComponent("Library/Application Support/LocalFlow/app.log")))
+            .appendingPathComponent("Library/Application Support/Lippy/app.log")))
     }
 }

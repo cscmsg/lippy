@@ -2,9 +2,9 @@
 import PackageDescription
 
 let package = Package(
-    name: "LocalFlow",
+    name: "Lippy",
     platforms: [.macOS(.v14)],
     targets: [
-        .executableTarget(name: "LocalFlow")
+        .executableTarget(name: "Lippy")
     ]
 )

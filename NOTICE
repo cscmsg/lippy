@@ -1,8 +1,8 @@
-LocalFlow
+Lippy
 Copyright (c) 2026 Courtney Cook
 Licensed under the MIT License (see LICENSE).
 
-LocalFlow does not redistribute any model weights. They are downloaded from
+Lippy does not redistribute any model weights. They are downloaded from
 Hugging Face on first run and stored in your own Hugging Face cache. The
 attributions below cover the models the software uses and the libraries it
 depends on.

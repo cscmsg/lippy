@@ -1,14 +1,14 @@
 #!/bin/bash
-# First-run setup, shipped inside LocalFlow.app.
+# First-run setup, shipped inside Lippy.app.
 #
 # Creates the Python environment and downloads the models, so installing from a
 # DMG does not require cloning the repository. Safe to re-run.
 #
-#   /Applications/LocalFlow.app/Contents/Resources/setup.sh
+#   /Applications/Lippy.app/Contents/Resources/setup.sh
 set -euo pipefail
 
 if [ "$(uname -m)" != "arm64" ]; then
-  echo "LocalFlow requires an Apple Silicon Mac (M1 or later)." >&2
+  echo "Lippy requires an Apple Silicon Mac (M1 or later)." >&2
   echo "This machine reports: $(uname -m)" >&2
   exit 1
 fi
@@ -22,9 +22,9 @@ else
   DAEMON_DIR="$(cd "$HERE/.." && pwd)/daemon"
 fi
 
-SUPPORT="$HOME/Library/Application Support/LocalFlow"
+SUPPORT="$HOME/Library/Application Support/Lippy"
 VENV="$SUPPORT/venv"
-AGENT_LABEL="com.cscmsg.localflow.flowd"
+AGENT_LABEL="com.cscmsg.lippy.lippyd"
 AGENT_PLIST="$HOME/Library/LaunchAgents/$AGENT_LABEL.plist"
 
 # Python 3.12 or newer, wherever it lives. The system python3 is deliberately
@@ -72,8 +72,8 @@ PY
 # Escape hatch for testing the script without touching the live launchd
 # session: the agent label is user-global, so a test run would otherwise
 # replace a working install.
-if [ -n "${LOCALFLOW_SKIP_AGENT:-}" ]; then
-  echo "LOCALFLOW_SKIP_AGENT set - stopping before the background service."
+if [ -n "${LIPPY_SKIP_AGENT:-}" ]; then
+  echo "LIPPY_SKIP_AGENT set - stopping before the background service."
   exit 0
 fi
 
@@ -89,7 +89,7 @@ cat > "$AGENT_PLIST" <<PLIST
 	<key>ProgramArguments</key>
 	<array>
 		<string>$VENV/bin/python</string>
-		<string>$DAEMON_DIR/flowd.py</string>
+		<string>$DAEMON_DIR/lippyd.py</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
@@ -101,9 +101,9 @@ cat > "$AGENT_PLIST" <<PLIST
 	<key>ProcessType</key>
 	<string>Interactive</string>
 	<key>StandardOutPath</key>
-	<string>$SUPPORT/flowd.out.log</string>
+	<string>$SUPPORT/lippyd.out.log</string>
 	<key>StandardErrorPath</key>
-	<string>$SUPPORT/flowd.err.log</string>
+	<string>$SUPPORT/lippyd.err.log</string>
 </dict>
 </plist>
 PLIST
@@ -126,9 +126,9 @@ fi
 
 echo "Waiting for the models to load (about 25 seconds)…"
 for _ in $(seq 1 45); do
-  if "$VENV/bin/python" "$DAEMON_DIR/flowctl.py" status >/dev/null 2>&1; then
+  if "$VENV/bin/python" "$DAEMON_DIR/lippyctl.py" status >/dev/null 2>&1; then
     echo
-    echo "Ready. Launch LocalFlow, then grant Microphone and Accessibility"
+    echo "Ready. Launch Lippy, then grant Microphone and Accessibility"
     echo "when macOS asks. Hold Right Option to dictate."
     exit 0
   fi
@@ -136,5 +136,5 @@ for _ in $(seq 1 45); do
 done
 
 echo "The service did not come up in time. Check:" >&2
-echo "  tail -f \"$SUPPORT/flowd.err.log\"" >&2
+echo "  tail -f \"$SUPPORT/lippyd.err.log\"" >&2
 exit 1

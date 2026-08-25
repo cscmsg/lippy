@@ -1,4 +1,4 @@
-# LocalFlow
+# Lippy
 
 A local replacement for Wispr Flow. Hold a key, talk, release — cleaned text
 appears at your cursor in whatever app has focus.
@@ -12,8 +12,8 @@ Two pieces, on purpose:
 
 | | |
 |---|---|
-| **`LocalFlow.app`** | Swift menu-bar app. Owns the hotkey, the microphone, the HUD, and the paste. |
-| **`flowd`** | Python daemon holding both models resident, reachable only over a `0600` unix socket. |
+| **`Lippy.app`** | Swift menu-bar app. Owns the hotkey, the microphone, the HUD, and the paste. |
+| **`lippyd`** | Python daemon holding both models resident, reachable only over a `0600` unix socket. |
 
 They are split because loading Parakeet plus a 4B LLM takes ~25 seconds. Keeping
 them warm in a daemon turns that into ~1.1s per utterance. The app is native
@@ -84,8 +84,8 @@ it rather than guessing.
 
 **From a release**
 
-1. Download the latest `LocalFlow-x.y.z.dmg` from
-   [Releases](https://github.com/cscmsg/localflow/releases) and drag the app to
+1. Download the latest `Lippy-x.y.z.dmg` from
+   [Releases](https://github.com/cscmsg/lippy/releases) and drag the app to
    Applications.
 2. Launch it, then choose **Run First-Time Setup…** from its menu bar item. That
    builds the Python environment, downloads the models (~4.5 GB, once) and
@@ -95,14 +95,14 @@ it rather than guessing.
 Or with Homebrew:
 
 ```
-brew install --cask cscmsg/tap/localflow
+brew install --cask cscmsg/tap/lippy
 ```
 
 **From source**
 
 ```
 make bootstrap        # venv + ~4.5 GB of model weights
-make install-daemon   # flowd as a LaunchAgent (survives reboot)
+make install-daemon   # lippyd as a LaunchAgent (survives reboot)
 make install          # build, sign, install to ~/Applications
 make dmg              # optional: build a distributable disk image
 ```
@@ -118,7 +118,7 @@ Confirm it is alive:
 
 ```
 make status                                    # daemon + loaded models
-~/Applications/LocalFlow.app/Contents/MacOS/LocalFlow --selftest sample.wav
+~/Applications/Lippy.app/Contents/MacOS/Lippy --selftest sample.wav
 ```
 
 ## Use
@@ -182,11 +182,11 @@ Detection uses the accessibility tree, and it deliberately **fails open**: only 
 confident "not editable" holds text back. Browsers and Electron apps under-report
 editability, and wrongly withholding text from a field that would have taken it
 is worse than a paste that lands somewhere harmless. Either way the transcript
-stays in **Copy Last Transcript** and in `flowctl last`.
+stays in **Copy Last Transcript** and in `lippyctl last`.
 
 ## Configuration
 
-`~/Library/Application Support/LocalFlow/config.json`, written on first run.
+`~/Library/Application Support/Lippy/config.json`, written on first run.
 
 ```json
 {
@@ -217,13 +217,13 @@ stays in **Copy Last Transcript** and in `flowctl last`.
   sample the LLM's whole contribution was joining one sentence fragment, which
   is why `clean` is the right default anywhere a 4B model is a stretch.
 
-Restart the daemon after editing: `launchctl kickstart -k gui/$(id -u)/com.cscmsg.localflow.flowd`
+Restart the daemon after editing: `launchctl kickstart -k gui/$(id -u)/com.cscmsg.lippy.lippyd`
 
 ## Privacy
 
 - The socket is `0600` in your Application Support directory. No TCP port is opened.
 - Audio is never written to disk — it goes from the mic through memory to the model.
-- Transcripts are held in daemon **memory** only (last 20, for `flowctl last`).
+- Transcripts are held in daemon **memory** only (last 20, for `lippyctl last`).
   Nothing is logged to disk on purpose: dictation is the most sensitive text on
   the machine, and a plaintext log of it is a liability a local-first tool has no
   reason to create.
@@ -235,12 +235,12 @@ Restart the daemon after editing: `launchctl kickstart -k gui/$(id -u)/com.cscms
 ```
 make logs                                  # tail the daemon log
 make status                                # health + loaded models
-$VENV/bin/python daemon/flowctl.py file x.wav        # full pipeline on a file
-$VENV/bin/python daemon/flowctl.py file x.wav --raw  # rules only, no LLM
-$VENV/bin/python daemon/flowctl.py last              # recent utterances
+$VENV/bin/python daemon/lippyctl.py file x.wav        # full pipeline on a file
+$VENV/bin/python daemon/lippyctl.py file x.wav --raw  # rules only, no LLM
+$VENV/bin/python daemon/lippyctl.py last              # recent utterances
 ```
 
-`flowctl file` prints raw ASR and final text separately, plus which guard fired
+`lippyctl file` prints raw ASR and final text separately, plus which guard fired
 if the polish pass fell back — that separation is usually enough to tell whether
 a bad result came from mishearing or from over-editing.
 

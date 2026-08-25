@@ -5,7 +5,7 @@
 # echoed, and the two genuinely secret values are piped rather than passed as
 # arguments, so they never reach your shell history or the process list.
 #
-#   ./scripts/set-release-secrets.sh cscmsg/localflow
+#   ./scripts/set-release-secrets.sh cscmsg/lippy
 set -euo pipefail
 
 REPO="${1:-}"

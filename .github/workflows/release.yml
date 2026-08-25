@@ -63,7 +63,7 @@ jobs:
           ./scripts/make_app.sh
           # make_app.sh already fails the build if the microphone entitlement is
           # missing; a build without it looks fine and cannot hear anything.
-          codesign --verify --deep --strict --verbose=2 .dist/LocalFlow.app
+          codesign --verify --deep --strict --verbose=2 .dist/Lippy.app
 
       - name: Build the disk image
         run: ./scripts/make_dmg.sh
@@ -72,7 +72,7 @@ jobs:
         if: env.APPLE_DEVELOPER_CERT_P12 != ''
         run: |
           set -euo pipefail
-          DMG="$(ls .dist/LocalFlow-*.dmg)"
+          DMG="$(ls .dist/Lippy-*.dmg)"
           # The image needs its own signature, not just the app inside it.
           # Notarisation succeeds either way, but Gatekeeper's check on the
           # downloaded .dmg reports "no usable signature" without this, which is
@@ -86,7 +86,7 @@ jobs:
           set -euo pipefail
           KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
           echo "$APPLE_API_KEY_P8" | base64 --decode > "$KEY_PATH"
-          DMG="$(ls .dist/LocalFlow-*.dmg)"
+          DMG="$(ls .dist/Lippy-*.dmg)"
 
           xcrun notarytool submit "$DMG" \
             --key "$KEY_PATH" \
@@ -105,24 +105,24 @@ jobs:
           # And the verdict on the app itself, which is what actually launches.
           MNT="$(mktemp -d)"
           hdiutil attach "$DMG" -nobrowse -quiet -mountpoint "$MNT"
-          spctl -a -vv "$MNT/LocalFlow.app"
-          codesign --verify --deep --strict --verbose=2 "$MNT/LocalFlow.app"
+          spctl -a -vv "$MNT/Lippy.app"
+          codesign --verify --deep --strict --verbose=2 "$MNT/Lippy.app"
           hdiutil detach "$MNT" -quiet
 
       - name: Checksums
         run: |
           cd .dist
-          shasum -a 256 LocalFlow-*.dmg | tee SHA256SUMS.txt
+          shasum -a 256 Lippy-*.dmg | tee SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v7
         with:
-          name: LocalFlow-dmg
+          name: Lippy-dmg
           # .dist is a dot-directory and upload-artifact excludes hidden paths
           # by default, which silently uploads nothing and annotates the run as
           # if the build had produced no files.
           include-hidden-files: true
           path: |
-            .dist/LocalFlow-*.dmg
+            .dist/Lippy-*.dmg
             .dist/SHA256SUMS.txt
 
       - name: Publish release
@@ -130,6 +130,6 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: |
-            .dist/LocalFlow-*.dmg
+            .dist/Lippy-*.dmg
             .dist/SHA256SUMS.txt
           generate_release_notes: true

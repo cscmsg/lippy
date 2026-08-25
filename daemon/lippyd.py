@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""LocalFlow daemon: holds the models warm, turns audio into finished text.
+"""Lippy daemon: holds the models warm, turns audio into finished text.
 
 The daemon exists for one reason: loading Parakeet and a 4B LLM takes about
 25 seconds, and nobody will wait 25 seconds to dictate a sentence. Keeping them
@@ -32,7 +32,7 @@ import config as config_mod
 import protocol
 import rules
 
-log = logging.getLogger("localflow.daemon")
+log = logging.getLogger("lippy.daemon")
 
 
 class Engine:
@@ -170,11 +170,11 @@ def main() -> int:
     # MLX is Apple-Silicon only. Fail here with a sentence rather than deep
     # inside a model load with a Metal error.
     if platform.machine() != "arm64":
-        print(f"LocalFlow requires an Apple Silicon Mac; this is {platform.machine()}",
+        print(f"Lippy requires an Apple Silicon Mac; this is {platform.machine()}",
               file=sys.stderr)
         return 1
 
-    parser = argparse.ArgumentParser(description="LocalFlow dictation daemon")
+    parser = argparse.ArgumentParser(description="Lippy dictation daemon")
     parser.add_argument("--socket", type=pathlib.Path, default=None)
     parser.add_argument("--level", choices=config_mod.CLEANUP_LEVELS,
                         help="cleanup dial: raw | fillers | clean | polish")

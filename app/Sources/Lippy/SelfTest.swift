@@ -1,7 +1,7 @@
 import AVFoundation
 import Foundation
 
-/// `LocalFlow --selftest [file.wav]` -- exercises the Swift side of the socket
+/// `Lippy --selftest [file.wav]` -- exercises the Swift side of the socket
 /// protocol without needing a microphone, Accessibility permission, or a
 /// keypress.
 ///
@@ -13,7 +13,7 @@ enum SelfTest {
 
     static func run(path: String?) -> Int32 {
         let socketPath = (NSHomeDirectory() as NSString)
-            .appendingPathComponent("Library/Application Support/LocalFlow/flowd.sock")
+            .appendingPathComponent("Library/Application Support/Lippy/lippyd.sock")
 
         let samples: [Float]
         if let path {

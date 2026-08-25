@@ -15,7 +15,7 @@ if arguments.contains("--diagnose") {
 }
 
 if arguments.contains("--version") {
-    print("LocalFlow \(AppDelegate.version)")
+    print("Lippy \(AppDelegate.version)")
     exit(0)
 }
 

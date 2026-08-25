@@ -22,7 +22,7 @@ import re
 import time
 from dataclasses import dataclass
 
-log = logging.getLogger("localflow.polish")
+log = logging.getLogger("lippy.polish")
 
 SYSTEM_PROMPT = """You are a transcription cleanup filter. You receive raw \
 speech-to-text output and return the same message, cleaned.

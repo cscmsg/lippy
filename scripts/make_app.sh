@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build LocalFlow.app from the SwiftPM release binary.
+# Build Lippy.app from the SwiftPM release binary.
 #
 # Signing matters more here than in a normal app: the Accessibility and
 # Microphone grants are bound to the code signature, so an ad-hoc signature
@@ -8,9 +8,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="$(grep -m1 'static let version' app/Sources/LocalFlow/AppDelegate.swift | sed 's/.*"\(.*\)".*/\1/')"
-BUNDLE_ID="com.cscmsg.localflow"
-APP=".dist/LocalFlow.app"
+VERSION="$(grep -m1 'static let version' app/Sources/Lippy/AppDelegate.swift | sed 's/.*"\(.*\)".*/\1/')"
+BUNDLE_ID="com.cscmsg.lippy"
+APP=".dist/Lippy.app"
 
 swift build -c release --package-path app
 
@@ -20,7 +20,7 @@ mkdir -p .dist "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Belt and braces alongside the dot-directory: Spotlight skips dot-prefixed
 # paths, and this marker makes the exclusion explicit for anything that does not.
 touch .dist/.metadata_never_index
-cp app/.build/release/LocalFlow "$APP/Contents/MacOS/LocalFlow"
+cp app/.build/release/Lippy "$APP/Contents/MacOS/Lippy"
 if [ -f Assets/AppIcon.icns ]; then
   cp Assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
@@ -40,13 +40,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
 	<key>CFBundleExecutable</key>
-	<string>LocalFlow</string>
+	<string>Lippy</string>
 	<key>CFBundleIdentifier</key>
 	<string>${BUNDLE_ID}</string>
 	<key>CFBundleName</key>
-	<string>LocalFlow</string>
+	<string>Lippy</string>
 	<key>CFBundleDisplayName</key>
-	<string>LocalFlow</string>
+	<string>Lippy</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleIconFile</key>
@@ -64,7 +64,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>LocalFlow transcribes your speech on this Mac. Audio is never sent anywhere.</string>
+	<string>Lippy transcribes your speech on this Mac. Audio is never sent anywhere.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright (c) 2026 Courtney Cook. MIT licensed.</string>
 </dict>
@@ -113,10 +113,10 @@ fi
 
 if [ -n "${IDENTITY:-}" ]; then
   codesign --force --options runtime \
-    --entitlements app/LocalFlow.entitlements --sign "$IDENTITY" "$APP"
+    --entitlements app/Lippy.entitlements --sign "$IDENTITY" "$APP"
   echo "Signed with: $(codesign -dvv "$APP" 2>&1 | grep '^Authority' | head -1 | cut -d= -f2)"
 else
-  codesign --force --entitlements app/LocalFlow.entitlements --sign - "$APP"
+  codesign --force --entitlements app/Lippy.entitlements --sign - "$APP"
   echo "WARNING: ad-hoc signed - macOS will require re-granting Accessibility and"
   echo "         Microphone access after every rebuild."
 fi

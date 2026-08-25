@@ -99,7 +99,7 @@ final class HotkeyMonitor {
 
     func start() {
         // Global monitors see other apps' events; local monitors see our own.
-        // Both are needed, or the hotkey dies whenever a LocalFlow window is key.
+        // Both are needed, or the hotkey dies whenever a Lippy window is key.
         let global = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] in
             self?.handleFlags($0)
         }
