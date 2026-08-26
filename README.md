@@ -288,6 +288,24 @@ Scoped out of v1 deliberately:
 
 ## Declined
 
+**A mobile version**, iOS or Android, decided against on 2026-08-26 after a
+feasibility study. Not on effort: the speech recognition ports cleanly and the
+deterministic cleanup is a few hundred lines of regex that would move to Kotlin
+in an afternoon.
+
+It is declined because on a phone, seamless dictation is a property of the
+keyboard, and both platforms reserve that. Apple permits third-party text
+insertion only through a keyboard extension, so every use costs a switch away
+from the keyboard you were using and back. Android does offer a genuinely
+one-tap path, but only to an input method, which means shipping and maintaining
+a full keyboard measured against the one already installed. A minimal input
+method that is only a microphone button collapses back into the same
+switch-and-return friction as iOS.
+
+There is no middle option. Either you are the keyboard, or the user pays a tax
+on every sentence. Neither is worth it for a dictation tool, so this is a
+decision rather than a deferral.
+
 **Live transcription preview** (words appearing in the HUD as you speak), built
 in v0.3.0, removed in v0.4.0 after use. It was not a rendering problem that
 could be polished away.
