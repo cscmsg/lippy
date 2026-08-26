@@ -115,11 +115,21 @@ rather than replaced.
   refuse to paste into windows that would have taken the text.
 - Keep both models resident for the life of the process. There is no daemon to
   hold them, so the tray app is the warm process.
+- **Pin `onnxruntime` before shipping a build to anyone.** It arrives as a
+  transitive dependency of `sherpa-onnx` and nothing declares a version, so the
+  inference engine underneath the speech model is whatever pip resolved on the
+  day. Both platforms happen to sit on 1.29.0 as of 2026-08-26, which is luck
+  rather than a guarantee. An unpinned engine is how the same audio starts
+  decoding differently on two machines, and the divergence is invisible until
+  someone compares outputs on purpose.
 
 ## Phase 3, CI
 
-**Landed**, with one caveat: the Windows job has never run. It was written
-on a Mac and its first execution will be the pull request that adds it.
+**Landed and run.** First execution was the pull request that added it, and it
+passed. On `windows-2025-vs2026`: pip ignored all three MLX pins on their
+markers, `SUPPORT_DIR` resolved to `C:\Users\runneradmin\AppData\Local\Lippy`,
+the model fetched and unpacked on a cold cache, 104 tests passed, and the
+fixture transcribed to the same string macOS produces on both of its backends.
 
 - A Windows job on `windows-2025-vs2026` that installs the requirements, runs
   the full test suite, and exercises a file-through-the-pipeline smoke test
