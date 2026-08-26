@@ -21,11 +21,16 @@ enum TextInjector {
     static func insert(_ text: String) {
         guard !text.isEmpty else { return }
 
+        // Dictation arrives one utterance at a time. Without this, a second
+        // sentence lands hard against the first: "Ship it Tuesday.The bug is
+        // fixed."
+        let payload = Separator.prepare(text)
+
         let pasteboard = NSPasteboard.general
         let saved = snapshot(pasteboard)
 
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        pasteboard.setString(payload, forType: .string)
 
         pressCommandV()
 

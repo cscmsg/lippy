@@ -93,6 +93,16 @@ rather than replaced.
 - Paste via clipboard save, `SendInput` Ctrl+V, restore after a delay. Mirror
   `TextInjector.swift`'s reasoning, including why synthesized typing was
   rejected.
+- **Port the separator decision.** Dictation arrives one utterance at a time, so
+  without it a second sentence lands hard against the first
+  ("Ship it Tuesday.The bug is fixed"). `Separator.needed(after:inserting:)` is
+  pure and ports as-is, and `--selftest-separator` covers it. What does not port
+  is the reading of the character before the cursor: macOS uses the
+  accessibility tree, and Windows needs its own route (UI Automation
+  `TextPattern`, or a fallback that declines to guess). Keep the fail-closed
+  behaviour: when the app will not say what precedes the cursor, add nothing. A
+  missing space is one keystroke to fix, a spurious leading space appears on the
+  first dictation into every such app.
 - Port the recovery panel: when no editable field has focus, hold the text and
   offer a copy button rather than pasting into nothing.
 - Keep both models resident for the life of the process. There is no daemon to

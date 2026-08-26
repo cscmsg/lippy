@@ -9,6 +9,11 @@ if arguments.contains("--selftest") {
     exit(SelfTest.run(path: path))
 }
 
+if arguments.contains("--selftest-separator") {
+    // Pure logic, so this needs no daemon, no permissions and no focused window.
+    exit(Separator.runSelfTest())
+}
+
 if arguments.contains("--diagnose") {
     // Turns four silent failure modes into four lines of output.
     exit(Diagnose.run())
