@@ -19,8 +19,11 @@ import json
 import logging
 import pathlib
 import re
+import sys
 import time
 from dataclasses import dataclass
+
+import config
 
 log = logging.getLogger("lippy.polish")
 
@@ -251,17 +254,30 @@ class OnnxEngine:
 
 
 def build_engine(model_id: str, engine: str | None = None):
-    """Pick an engine. Explicit wins; otherwise infer from the identifier.
+    """Pick an engine. Explicit wins, then the identifier, then the platform.
 
     A filesystem path is an ONNX model directory; a Hugging Face repo id in the
-    mlx-community namespace is an MLX model.
+    mlx-community namespace is an MLX model. Anything left over follows the
+    platform, because MLX is Apple-only and the ONNX runtime cannot load an MLX
+    export.
     """
     if engine == "mlx":
         return MlxEngine(model_id)
     if engine == "onnx":
         return OnnxEngine(model_id)
+    if engine is not None:
+        raise ValueError(f"unknown polish engine: {engine!r}")
     if pathlib.Path(model_id).is_dir():
         return OnnxEngine(model_id)
+    if config.default_polish_engine() == "onnx":
+        # Say which choice was wrong. Handing an MLX repo id to the ONNX
+        # runtime gets you a complaint about a missing file, which sends the
+        # reader looking for a download that was never the problem.
+        raise ValueError(
+            f"polish on {sys.platform} needs a genai-format model directory, "
+            f"and {model_id!r} is not one. Point polish_model at an unpacked "
+            f"ONNX genai model, or leave cleanup_level at 'clean'."
+        )
     return MlxEngine(model_id)
 
 

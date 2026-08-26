@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import logging
 import os
-import pathlib
 import time
 from dataclasses import dataclass
 
 import numpy as np
+
+import config
+import models
 
 log = logging.getLogger("lippy.asr")
 
@@ -95,14 +97,18 @@ class SherpaBackend:
     def __init__(self, model_dir: str | None = None) -> None:
         import sherpa_onnx
 
-        directory = pathlib.Path(
-            model_dir
-            or os.environ.get("LIPPY_ONNX_MODEL_DIR")
-            or pathlib.Path.home() / ".cache" / "lippy-onnx"
-            / "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
-        )
-        if not directory.is_dir():
-            raise FileNotFoundError(f"ONNX model directory not found: {directory}")
+        # Resolved by models.py so the place this loads from and the place the
+        # bootstrap writes to cannot drift apart.
+        directory = models.model_dir(model_dir)
+        if not models.is_complete(directory):
+            # is_complete rather than is_dir: a download killed part-way leaves
+            # the directory behind, and loading from it fails inside the
+            # decoder with nothing pointing back at the real cause.
+            raise FileNotFoundError(
+                f"ONNX model not ready at {directory}. Fetch it with "
+                f"`python daemon/models.py`, or set LIPPY_ONNX_MODEL_DIR to an "
+                f"existing copy."
+            )
 
         t0 = time.perf_counter()
         self._recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
@@ -183,7 +189,14 @@ def _is_silence(pcm: np.ndarray, duration: float) -> bool:
     return False
 
 
-def build(backend: str, model_id: str | None = None):
+def build(backend: str | None = None, model_id: str | None = None):
+    """Construct a backend. None means "whatever this platform runs".
+
+    The platform default is not cosmetic: MLX has no Windows build, so asking
+    for "parakeet" there fails at import with a message about a missing module
+    rather than about a backend choice.
+    """
+    backend = backend or config.default_asr_backend()
     if backend == "parakeet":
         return ParakeetBackend(model_id) if model_id else ParakeetBackend()
     if backend == "sherpa":

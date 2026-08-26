@@ -8,3 +8,6 @@ __pycache__/
 *.xcodeproj
 .DS_Store
 .signing-identity
+
+# Per-machine worktrees for parallel sessions
+.worktrees/

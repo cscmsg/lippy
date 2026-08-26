@@ -1,0 +1,14 @@
+# The Windows install set.
+#
+# It is a thin wrapper rather than a second list: the shared pins live in
+# requirements.txt, whose MLX entries carry `sys_platform == "darwin"` markers
+# and are skipped here by pip itself. Copying the shared pins into this file
+# would give the two lists room to drift, and the drift would only show up as a
+# platform-specific failure long after the edit that caused it.
+-r requirements.txt
+
+# Nothing Windows-only is declared yet, on purpose. The tray, the low-level
+# keyboard hook and the audio capture arrive with the Windows shell (Part 1,
+# Phase 2 of docs/plans/windows-client.md), and pinning sounddevice, a tray
+# library and Win32 bindings before anything imports them would put three
+# unverified pins in CI to no end.
