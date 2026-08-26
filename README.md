@@ -288,23 +288,26 @@ Scoped out of v1 deliberately:
 
 ## Declined
 
-**A mobile version**, iOS or Android, decided against on 2026-08-26 after a
-feasibility study. Not on effort: the speech recognition ports cleanly and the
-deterministic cleanup is a few hundred lines of regex that would move to Kotlin
-in an afternoon.
+**A system-wide mobile version**, iOS or Android, decided against on
+2026-08-26 after a feasibility study. Not on effort: the speech recognition
+ports cleanly and the deterministic cleanup is a few hundred lines of regex.
 
-It is declined because on a phone, seamless dictation is a property of the
-keyboard, and both platforms reserve that. Apple permits third-party text
-insertion only through a keyboard extension, so every use costs a switch away
-from the keyboard you were using and back. Android does offer a genuinely
-one-tap path, but only to an input method, which means shipping and maintaining
-a full keyboard measured against the one already installed. A minimal input
-method that is only a microphone button collapses back into the same
-switch-and-return friction as iOS.
+The blocker is a platform rule, not a missing library. **Mobile operating
+systems forbid one app from putting text into another app's field.** The input
+method is the only sanctioned bridge, which is why the sole one-tap path on
+Android is to ship a full keyboard, and why iOS charges a switch away and back
+on every use. A minimal input method that is only a microphone button collapses
+back into that same friction.
 
-There is no middle option. Either you are the keyboard, or the user pays a tax
-on every sentence. Neither is worth it for a dictation tool, so this is a
-decision rather than a deferral.
+This tool exists on macOS precisely because desktop platforms grant what mobile
+withholds. Accessibility on macOS, and SendInput on Windows, are sanctioned
+cross-app text injection. That affordance was deliberately removed from phones.
+
+**What this does not decline:** dictation inside an application you control.
+When the destination field belongs to your own app there is no cross-app
+boundary to cross, so none of the above applies. The cleanup rules and the
+guards in this repository are plain logic and port to any platform. They are
+the reusable part.
 
 **Live transcription preview** (words appearing in the HUD as you speak), built
 in v0.3.0, removed in v0.4.0 after use. It was not a rendering problem that
