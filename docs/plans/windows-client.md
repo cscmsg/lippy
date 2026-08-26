@@ -104,7 +104,11 @@ rather than replaced.
   missing space is one keystroke to fix, a spurious leading space appears on the
   first dictation into every such app.
 - Port the recovery panel: when no editable field has focus, hold the text and
-  offer a copy button rather than pasting into nothing.
+  offer a copy button rather than pasting into nothing. Carry the fail-open rule
+  with it, and `--selftest-destination` covers that rule the same way: an
+  unreadable answer from the accessibility layer is *unknown*, never "not
+  editable". Reading an error as a confident no is what made the macOS build
+  refuse to paste into windows that would have taken the text.
 - Keep both models resident for the life of the process. There is no daemon to
   hold them, so the tray app is the warm process.
 
