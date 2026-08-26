@@ -61,12 +61,10 @@ rather than replaced.
 
 ## Phase 1, declare and wire the ONNX backends
 
-- **Fix the undeclared dependency first.** `daemon/asr.py` imports
-  `sherpa_onnx` and `daemon/polish.py` imports `onnxruntime_genai`, and
-  `daemon/requirements.txt` pins neither. A fresh install breaks on exactly the
-  code paths Windows needs. Add a `daemon/requirements-windows.txt` with the
-  verified pins (`sherpa-onnx==1.13.6`, `onnxruntime-genai==0.15.2`) and make
-  the macOS-only MLX pins conditional rather than universal.
+- ~~Declare the ONNX backends.~~ **Done before this plan started.**
+  `sherpa-onnx==1.13.6` and `onnxruntime-genai==0.15.2` are now pinned in
+  `daemon/requirements.txt`. What remains is splitting the macOS-only MLX pins
+  out so a Windows install does not try to build them.
 - Make backend selection platform-aware in `asr.py`'s `build()` and
   `polish.py`'s `build_engine()`: default to `sherpa` / `onnx` off Darwin,
   `parakeet` / `mlx` on it. Keep both importable everywhere so the macOS tests
