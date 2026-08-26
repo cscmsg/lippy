@@ -14,6 +14,12 @@ if arguments.contains("--selftest-separator") {
     exit(Separator.runSelfTest())
 }
 
+if arguments.contains("--selftest-destination") {
+    // Pure logic too: whether a reading of the accessibility tree means "hold
+    // this text back" is decided without touching the tree.
+    exit(TextDestination.runSelfTest())
+}
+
 if arguments.contains("--diagnose") {
     // Turns four silent failure modes into four lines of output.
     exit(Diagnose.run())

@@ -199,6 +199,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isLatched = latched
         recordingStart = Date()
 
+        // Asked for here rather than at the end, and deliberately after the
+        // recorder is running: an Electron app builds its accessibility tree
+        // only when something asks, and it builds it asynchronously. Asking now
+        // leaves the length of the utterance for the answer to arrive, and a
+        // slow app costs a moment of HUD rather than the first word of speech.
+        TextDestination.wakeFrontmostApp()
+
         // Checked up front, not only at the end: the failure worth preventing is
         // speaking for a minute and only then discovering there was no target.
         noDestinationAtStart = TextDestination.shouldHoldBack

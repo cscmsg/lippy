@@ -181,8 +181,18 @@ page, nothing happens and the words are gone. Two guards:
 Detection uses the accessibility tree, and it deliberately **fails open**: only a
 confident "not editable" holds text back. Browsers and Electron apps under-report
 editability, and wrongly withholding text from a field that would have taken it
-is worse than a paste that lands somewhere harmless. Either way the transcript
-stays in **Copy Last Transcript** and in `lippyctl last`.
+is worse than a paste that lands somewhere harmless. An unreadable answer counts
+as no answer, not as a no. Either way the transcript stays in **Copy Last
+Transcript** and in `lippyctl last`.
+
+Electron apps need one step before any of that works. They leave the
+accessibility tree unbuilt until something asks for it, so an Electron window
+reports nothing focused while the cursor is blinking in a text box. At the start
+of each capture Lippy asks the frontmost app to publish its tree, using the
+`AXManualAccessibility` attribute Electron documents for assistive apps, which is
+the same switch a screen reader flips. Apps that do not recognise the request
+ignore it. The tree is built asynchronously, which is why the request goes out
+when the key goes down rather than when it comes up.
 
 ## Configuration
 
