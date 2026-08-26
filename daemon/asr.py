@@ -179,6 +179,29 @@ class WhisperBackend:
         return Transcript(text, duration, time.perf_counter() - t0)
 
 
+def load_wav(path) -> np.ndarray:
+    """One WAV file as 16 kHz mono float32, the shape every backend takes.
+
+    Lives here rather than in the CLI because the Windows client has no daemon
+    to talk to and no reason to import a socket client to read a file.
+    """
+    import soundfile as sf
+
+    pcm, rate = sf.read(str(path), dtype="float32")
+    if pcm.ndim > 1:
+        pcm = pcm.mean(axis=1)
+    if rate != SAMPLE_RATE:
+        # Linear index resample. Adequate here because Parakeet's own front end
+        # low-passes to a 128-bin mel anyway; use ffmpeg if you need better.
+        count = int(len(pcm) * SAMPLE_RATE / rate)
+        pcm = np.interp(
+            np.linspace(0, len(pcm) - 1, count),
+            np.arange(len(pcm)),
+            pcm,
+        ).astype(np.float32)
+    return pcm
+
+
 def _is_silence(pcm: np.ndarray, duration: float) -> bool:
     if duration < MIN_DURATION_S:
         return True

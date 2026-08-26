@@ -1,6 +1,7 @@
 name: test
 # Action versions verified against the GitHub API on 2026-08-26:
-#   actions/checkout v7.0.1, actions/setup-python v7.0.0. Pinned to the major.
+#   actions/checkout v7.0.1, actions/setup-python v7.0.0, actions/cache v6.1.0.
+# Pinned to the major.
 
 # Pushes are watched on main only. Everything else arrives as a pull request,
 # and listening to both would run every branch twice.
@@ -59,3 +60,60 @@ jobs:
           BIN="$(swift build --package-path app --show-bin-path)"
           "$BIN/Lippy" --selftest-separator
           "$BIN/Lippy" --selftest-destination
+
+  windows:
+    name: windows client
+    # windows-2025-vs2026 is a current label, confirmed against the
+    # actions/runner-images README on 2026-08-26.
+    runs-on: windows-2025-vs2026
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # requirements-windows.txt pulls requirements.txt, whose MLX pins carry
+      # sys_platform markers and are skipped here by pip. If this step ever
+      # tries to build an Apple-only wheel, a marker has been dropped.
+      - name: Install
+        run: pip install -r daemon/requirements-windows.txt
+
+      # The tests monkeypatch sys.platform, which proves the branch and not the
+      # platform. This is the only place %LOCALAPPDATA% is a real variable on a
+      # real Windows profile.
+      - name: Resolve paths and defaults on the real thing
+        shell: python
+        run: |
+          import sys
+          sys.path.insert(0, "daemon")
+          import config
+
+          assert config.default_asr_backend() == "sherpa", config.default_asr_backend()
+          assert config.default_polish_engine() == "onnx", config.default_polish_engine()
+          assert config.default_cleanup_level() == "clean", config.default_cleanup_level()
+          assert config.SUPPORT_DIR.name == "Lippy", config.SUPPORT_DIR
+          assert "AppData" in str(config.SUPPORT_DIR), config.SUPPORT_DIR
+          print(config.SUPPORT_DIR)
+
+      # 487 MB that never changes, so it is cached on the model name. A miss
+      # costs one download, a hit costs seconds.
+      - name: Cache the ONNX model
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/lippy-onnx
+          key: onnx-sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8
+
+      - name: Fetch the ONNX model
+        run: python daemon/models.py
+
+      - name: Rules, guards and the Windows branches
+        run: python -m pytest tests/ -q
+
+      # A job that imports the modules and stops has not shown that the ONNX
+      # runtime can decode anything. This runs a real recording through a real
+      # model and checks two content words survive to the other end.
+      - name: One file through the pipeline
+        run: >
+          python daemon/selftest.py tests/fixtures/hello-lippy.wav
+          --level clean --expect ship --expect Tuesday

@@ -20,8 +20,10 @@ import numpy as np
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import asr
 import config as config_mod
 import protocol
+from asr import load_wav  # noqa: F401  (kept importable from here)
 
 SAMPLE_RATE = 16_000
 
@@ -34,24 +36,6 @@ def connect(path: pathlib.Path) -> socket.socket:
         sys.exit(f"no daemon listening on {path}\n"
                  f"start one with:  make daemon")
     return sock
-
-
-def load_wav(path: pathlib.Path) -> np.ndarray:
-    import soundfile as sf
-
-    pcm, rate = sf.read(str(path), dtype="float32")
-    if pcm.ndim > 1:
-        pcm = pcm.mean(axis=1)
-    if rate != SAMPLE_RATE:
-        # Linear index resample. Adequate here because Parakeet's own front end
-        # low-passes to a 128-bin mel anyway; use ffmpeg if you need better.
-        count = int(len(pcm) * SAMPLE_RATE / rate)
-        pcm = np.interp(
-            np.linspace(0, len(pcm) - 1, count),
-            np.arange(len(pcm)),
-            pcm,
-        ).astype(np.float32)
-    return pcm
 
 
 def send_audio(sock: socket.socket, pcm: np.ndarray, mode: str, app: str | None) -> dict:
