@@ -6,11 +6,31 @@ import json
 import logging
 import os
 import pathlib
+import sys
 from dataclasses import asdict, dataclass, field
 
 log = logging.getLogger("lippy.config")
 
-SUPPORT_DIR = pathlib.Path.home() / "Library" / "Application Support" / "Lippy"
+def _support_dir() -> pathlib.Path:
+    """Where config, logs and (on macOS) the socket live.
+
+    macOS keeps the location it has always used. Windows uses %LOCALAPPDATA%
+    rather than the roaming half of AppData deliberately: a log and a socket
+    path describe one machine, and roaming them onto a second machine would
+    carry claims that are not true there.
+    """
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        base = pathlib.Path(local) if local else pathlib.Path.home() / "AppData" / "Local"
+        return base / "Lippy"
+    if sys.platform == "darwin":
+        return pathlib.Path.home() / "Library" / "Application Support" / "Lippy"
+    xdg = os.environ.get("XDG_DATA_HOME")
+    root = pathlib.Path(xdg) if xdg else pathlib.Path.home() / ".local" / "share"
+    return root / "lippy"
+
+
+SUPPORT_DIR = _support_dir()
 CONFIG_PATH = SUPPORT_DIR / "config.json"
 SOCKET_PATH = SUPPORT_DIR / "lippyd.sock"
 LOG_PATH = SUPPORT_DIR / "lippyd.log"
@@ -39,12 +59,35 @@ DEFAULT_DICTIONARY: dict[str, str] = {}
 CLEANUP_LEVELS = ("raw", "fillers", "clean", "polish")
 
 
+# Backends follow the platform, because the wrong one does not fail gracefully:
+# MLX has no Windows build at all, and the ONNX runtime cannot load the MLX
+# export the macOS install already has on disk. Both stay importable
+# everywhere so the shared code keeps one set of tests rather than a fork.
+def default_asr_backend() -> str:
+    return "parakeet" if sys.platform == "darwin" else "sherpa"
+
+
+def default_polish_engine() -> str:
+    return "mlx" if sys.platform == "darwin" else "onnx"
+
+
+def default_cleanup_level() -> str:
+    """Off Darwin the dial ships at "clean": deterministic, and no second model.
+
+    Polish is not refused there, it is only not the default, because reaching it
+    means supplying a genai-format model directory that no install step provides
+    yet. Defaulting to a level that cannot load is the silent-failure shape this
+    repo keeps paying for elsewhere.
+    """
+    return "polish" if sys.platform == "darwin" else "clean"
+
+
 @dataclass
 class Config:
-    asr_backend: str = "parakeet"
+    asr_backend: str = field(default_factory=default_asr_backend)
     asr_model: str | None = None
 
-    cleanup_level: str = "polish"
+    cleanup_level: str = field(default_factory=default_cleanup_level)
     polish_model: str = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
 
     strip_fillers: bool = True
@@ -77,8 +120,9 @@ class Config:
 
         level = data.get("cleanup_level")
         if level is not None and level not in CLEANUP_LEVELS:
-            log.warning("unknown cleanup_level %r; falling back to 'polish'", level)
-            data["cleanup_level"] = "polish"
+            fallback = default_cleanup_level()
+            log.warning("unknown cleanup_level %r; falling back to %r", level, fallback)
+            data["cleanup_level"] = fallback
 
         return cls(**data)
 

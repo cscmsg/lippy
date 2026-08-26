@@ -1,12 +1,20 @@
 # Pinned to what was verified working on 2026-08-24 (macOS 26.5.1, M4 Pro).
-parakeet-mlx==0.5.2
-mlx-lm==0.31.3
-mlx-whisper==0.4.3
+#
+# The MLX pins carry a marker rather than living in a separate file. pip skips
+# them off Darwin, so this file stays installable everywhere, and a Windows
+# install does not try to build an Apple-only wheel from source.
+parakeet-mlx==0.5.2; sys_platform == "darwin"
+mlx-lm==0.31.3; sys_platform == "darwin"
+mlx-whisper==0.4.3; sys_platform == "darwin"
 soundfile==0.14.0
 
 # Cross-platform backends. asr.py's SherpaBackend and polish.py's OnnxEngine
 # import these, so leaving them undeclared broke a fresh install on exactly the
 # code paths that are not Apple-only. Verified on PyPI 2026-08-25.
+#
+# Verified: sherpa-onnx 1.13.6 and onnxruntime-genai 0.15.2 both publish
+# cp312 win_amd64 wheels -- PyPI JSON API, 2026-08-26. Neither builds from
+# source on a runner, so a missing wheel is a hard stop rather than a slow job.
 sherpa-onnx==1.13.6
 onnxruntime-genai==0.15.2
 numpy==2.5.2
