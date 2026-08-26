@@ -61,6 +61,8 @@ rather than replaced.
 
 ## Phase 1, declare and wire the ONNX backends
 
+**Landed.** Every item below is done.
+
 - ~~Declare the ONNX backends.~~ **Done before this plan started.**
   `sherpa-onnx==1.13.6` and `onnxruntime-genai==0.15.2` are now pinned in
   `daemon/requirements.txt`. What remains is splitting the macOS-only MLX pins
@@ -76,6 +78,8 @@ rather than replaced.
   resumable, with `LIPPY_ONNX_MODEL_DIR` as an override.
 
 ## Phase 2. The Windows shell
+
+**Not started.** This is all that is left of Part 1.
 
 - Tray icon with the same menu as macOS: the four cleanup levels, hotkey
   binding, latch modifier, Copy Last Transcript, open config, open log, quit.
@@ -113,6 +117,9 @@ rather than replaced.
   hold them, so the tray app is the warm process.
 
 ## Phase 3, CI
+
+**Landed**, with one caveat: the Windows job has never run. It was written
+on a Mac and its first execution will be the pull request that adds it.
 
 - A Windows job on `windows-2025-vs2026` that installs the requirements, runs
   the full test suite, and exercises a file-through-the-pipeline smoke test

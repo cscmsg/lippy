@@ -69,7 +69,7 @@ anything that fails falls back to the deterministic rule-cleaned text:
 When a guard fires it is logged with the reason, so you can see which one caught
 it rather than guessing.
 
-## Requirements
+## Requirements (macOS)
 
 - **Apple Silicon Mac** (M1 or later). MLX is Metal and unified-memory based, so
   there is no Intel path. Both the installer and the daemon refuse to run rather
@@ -120,6 +120,67 @@ Confirm it is alive:
 make status                                    # daemon + loaded models
 ~/Applications/Lippy.app/Contents/MacOS/Lippy --selftest sample.wav
 ```
+
+## Windows
+
+Partly built. The pipeline runs from source, transcribes a file and cleans the
+text. The tray icon, the hotkey and the paste are not written yet, so there is
+no hold-to-talk on Windows and little reason to install this unless you are
+working on it. What is left is tracked in
+[docs/plans/windows-client.md](docs/plans/windows-client.md).
+
+There is no daemon on Windows and there will not be one. The two-process split
+on macOS exists because macOS binds Microphone and Accessibility permission to
+a signed app bundle, which a virtual environment cannot hold across rebuilds.
+Windows has no equivalent constraint, so the finished client is one process.
+
+**Requirements (Windows)**
+
+- Windows 10 or later on x64. Both runtime wheels also publish arm64 builds,
+  which nobody has run here.
+- Python 3.12 or newer.
+- About 1 GB of disk. The speech model is 487 MB compressed and 643 MB
+  unpacked, and no language model is downloaded at all.
+
+**From source**
+
+```
+python -m venv .venv
+.venv\Scripts\pip install -r daemon\requirements-windows.txt
+.venv\Scripts\python daemon\models.py
+```
+
+The last line fetches the speech model into `%USERPROFILE%\.cache\lippy-onnx`.
+It resumes if the connection drops, so running it again after a failure picks
+up where it stopped rather than starting the 487 MB over. Set
+`LIPPY_ONNX_MODEL_DIR` to keep the model elsewhere, or to point at a copy you
+already have.
+
+Then run a recording through the pipeline:
+
+```
+.venv\Scripts\python daemon\selftest.py tests\fixtures\hello-lippy.wav
+```
+
+It prints the raw transcript and the final text separately, which is usually
+enough to tell a mishearing from an over-edit.
+
+**What differs from macOS, and why**
+
+- **The speech backend is sherpa-onnx rather than MLX.** MLX is Metal based and
+  has no Windows build at all. Same model family, different runtime, and the
+  int8 export is 643 MB against MLX's 2.51 GB.
+- **Cleanup ships at `clean` rather than `polish`.** The dial still has four
+  positions and everything below `polish` is the same deterministic regex on
+  both platforms. Reaching `polish` here means supplying a genai-format model
+  directory yourself, so it is not the default, and the code says exactly that
+  instead of failing at load with a message about a missing file.
+- **Config and logs live in `%LOCALAPPDATA%\Lippy`** rather than under
+  Application Support. Your dictation is still never written to disk on either
+  platform.
+- **There is no hotkey yet.** When there is, it will not default to Right Alt.
+  On international layouts that key is AltGr and produces characters, so a
+  default that is inert on a US and a European layout is the one worth picking.
 
 ## Use
 
@@ -283,7 +344,8 @@ echo <identity-hash> > .signing-identity
 make test
 ```
 
-33 tests, all offline. The interesting ones are negative: that the stutter
+104 tests, all offline. Ten of them need numpy and skip without it, which is
+how the lean test job stays lean. The interesting ones are negative: that the stutter
 collapser leaves `"I had had enough"` alone, that the filler stripper does not
 eat `"like"` or `"actually"`, and that each guardrail rejects the specific way a
 model has actually been observed to ruin a dictated message.
@@ -350,3 +412,9 @@ overwrites text you already wrote rather than filling an empty cursor.
 - `mlx-lm` 0.31.3 (PyPI, 2026-04-22)
 - `mlx-community/parakeet-tdt-0.6b-v3`, CC-BY-4.0, 2.51 GB, 25 languages
 - Built and run on macOS 26.5.1, Xcode 26.6, M4 Pro / 64 GB, 2026-08-24
+- `sherpa-onnx` 1.13.6 and `onnxruntime-genai` 0.15.2, cp312 win_amd64 wheels
+  confirmed on PyPI, 2026-08-26
+- `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8`, 487 MB compressed, from the
+  k2-fsa/sherpa-onnx `asr-models` release, 2026-08-26
+- `windows-2025-vs2026` confirmed a current runner label against the
+  actions/runner-images README, 2026-08-26
