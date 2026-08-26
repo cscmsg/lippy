@@ -1,0 +1,61 @@
+name: test
+# Action versions verified against the GitHub API on 2026-08-26:
+#   actions/checkout v7.0.1, actions/setup-python v7.0.0. Pinned to the major.
+
+# Pushes are watched on main only. Everything else arrives as a pull request,
+# and listening to both would run every branch twice.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch makes the run in flight irrelevant.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  daemon:
+    name: rules and polish guards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"   # what Lambda runs, and what the venv is built on
+
+      # Deliberately not requirements.txt. rules.py and polish.py import nothing
+      # outside the standard library at module scope (the one model import in
+      # polish.py sits inside the function that needs it), so the tests that
+      # protect the pasted text run without ~4.5 GB of models and without a
+      # macOS runner. If this step ever needs more than pytest, something has
+      # started importing a model at load time and that is worth knowing.
+      - name: Install pytest
+        run: pip install "pytest==9.1.1"
+
+      - name: Rules and guards
+        run: python -m pytest tests/ -q
+
+  app:
+    name: paste decisions
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build
+        run: swift build --package-path app
+
+      # Both of these are pure decisions: whether inserted text needs a leading
+      # space, and whether a reading of the accessibility tree means "hold this
+      # text back". Neither needs a daemon, a permission or a focused window,
+      # which is exactly why they can run here. The parts that do need those
+      # cannot be covered on a runner and are verified by hand against
+      # ~/Library/Application Support/Lippy/app.log.
+      - name: Separator and destination
+        run: |
+          set -euo pipefail
+          BIN="$(swift build --package-path app --show-bin-path)"
+          "$BIN/Lippy" --selftest-separator
+          "$BIN/Lippy" --selftest-destination
