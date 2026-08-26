@@ -4,7 +4,7 @@ REPO := $(shell pwd)
 AGENT := com.cscmsg.lippy.lippyd
 AGENT_PLIST := $(HOME)/Library/LaunchAgents/$(AGENT).plist
 
-.PHONY: bootstrap test app dmg install daemon install-daemon uninstall-daemon status logs clean
+.PHONY: bootstrap test app icon dmg install daemon install-daemon uninstall-daemon status logs clean
 
 ## First-time setup: venv + model download (~4.5 GB).
 bootstrap:
@@ -15,6 +15,11 @@ test:
 
 app:
 	./scripts/make_app.sh
+
+## Regenerate the app icon. make_app.sh calls this itself when the icns is
+## missing, so it rarely needs running by hand.
+icon:
+	swift scripts/make_icon.swift && iconutil -c icns Assets/AppIcon.iconset -o Assets/AppIcon.icns && rm -rf Assets/AppIcon.iconset
 
 ## Distributable disk image. Signing/notarisation happen in CI, not here --
 ## the production certificate deliberately does not live on this machine.

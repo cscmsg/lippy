@@ -21,9 +21,15 @@ mkdir -p .dist "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # paths, and this marker makes the exclusion explicit for anything that does not.
 touch .dist/.metadata_never_index
 cp app/.build/release/Lippy "$APP/Contents/MacOS/Lippy"
-if [ -f Assets/AppIcon.icns ]; then
-  cp Assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# Build the icon if it is missing rather than shipping without one. A bundle
+# with CFBundleIconFile set and no icns silently falls back to the generic app
+# icon, which looks like an oversight rather than a choice.
+if [ ! -f Assets/AppIcon.icns ]; then
+  swift scripts/make_icon.swift
+  iconutil -c icns Assets/AppIcon.iconset -o Assets/AppIcon.icns
+  rm -rf Assets/AppIcon.iconset
 fi
+cp Assets/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 # Ship the daemon inside the bundle so a DMG install needs no repository
 # checkout. These are plain .py files -- no compiled code -- so they do not
