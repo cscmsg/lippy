@@ -51,8 +51,9 @@ the note still nailed to it.
   identity decision starts here.
 
 **Environments that will run this code:** Windows on a GitHub Actions runner
-(headless, no audio device, no interactive desktop), and a real machine with
-real audio and a real keyboard. Nothing in between.
+(headless, no audio device, no interactive desktop), and the author's own
+Windows laptop, which has real audio and a real keyboard. The interactive layer
+is testable. Use it early rather than at the end.
 
 **Rollback:** the Windows client is additive. Nothing in it can break the macOS
 build if `asr.py` and `polish.py` backend selection stays keyed off the platform
@@ -141,9 +142,9 @@ on a developer's assertion.
 - Do not fork `rules.py` or the polish guards. If Windows needs different
   behaviour, it needs a parameter, not a copy.
 - Do not touch the macOS app target.
-- No Windows machine is available to the author. CI is the only execution
-  surface during development, and the interactive layer will first run on
-  someone else's hardware. Write the logging accordingly. The macOS build only
-  became debuggable once the app wrote its own log file to disk, and the same
-  will be true here. Build that in from the first commit, not after the first
-  mystery.
+- Write the logging first, not after the first mystery. The macOS build only
+  became debuggable once the app wrote its own log to disk, and every one of its
+  early failures was silent: a converter that returned zero frames without
+  erroring, an entitlement refused before the permission system was consulted,
+  an exception swallowed by the UI framework. Assume the Windows equivalents
+  exist and instrument for them from the first commit.

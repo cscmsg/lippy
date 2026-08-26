@@ -5,12 +5,9 @@
 # alongside a release. Copy it across when cutting one.
 #
 #   sha256: shasum -a 256 Lippy-<version>.dmg   (also in SHA256SUMS.txt)
-# WARNING: the v0.8.0 build is ad-hoc signed, not notarised, because the Apple
-# secrets are not yet present in this repository. Gatekeeper rejects it. Do not
-# publish this cask to a tap until a signed release exists.
 cask "lippy" do
-  version "0.8.0"
-  sha256 "cf7ad4d69ada5e877a23545fba3e6a3d08431f97d86789e93ec2eae0c60fa03b"
+  version "0.9.0"
+  sha256 "3b95c34ccb246ad8e3f921d4fe2f3d4e080eb5973ed39e213b01542ab1e483f0"
 
   url "https://github.com/cscmsg/lippy/releases/download/v#{version}/Lippy-#{version}.dmg"
   name "Lippy"

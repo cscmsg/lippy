@@ -3,5 +3,11 @@ parakeet-mlx==0.5.2
 mlx-lm==0.31.3
 mlx-whisper==0.4.3
 soundfile==0.14.0
+
+# Cross-platform backends. asr.py's SherpaBackend and polish.py's OnnxEngine
+# import these, so leaving them undeclared broke a fresh install on exactly the
+# code paths that are not Apple-only. Verified on PyPI 2026-08-25.
+sherpa-onnx==1.13.6
+onnxruntime-genai==0.15.2
 numpy==2.5.2
 pytest==9.1.1

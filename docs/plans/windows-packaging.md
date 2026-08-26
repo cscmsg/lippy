@@ -108,5 +108,5 @@ exactly those machines could never be reached.
 - Do not publish to the Store until the artifact has been installed and used on
   a real machine. CI producing a file is not evidence that it works, and store
   review latency makes a bad first submission expensive.
-- The author has no Windows machine. Deliverable 4 requires someone else, and
-  the work is not done until they have done it.
+- Deliverable 4 is not optional. CI producing an artifact is not evidence that
+  it installs, and an artifact that installs is not evidence that it works.
