@@ -1,179 +1,298 @@
 # Lippy on Windows, Part 1 of 2: the client
 
-*Part 1 of 2. A work brief, not documentation of something that exists. Written
-2026-08-25, before any Windows code.*
+*A work brief, not documentation of something that exists. Originally written
+2026-08-25 covering three phases. Phases 1 and 3 shipped on 2026-08-26 and their
+sections have been removed, because a plan describing something that already
+ships has outlived its purpose. What is left here is the Windows shell, which is
+the whole remainder of Part 1. Re-scoped 2026-08-26.*
+
+## Already landed, so you can skip it
+
+The shared layer and the CI job are done, in cscmsg/lippy#3 and #4. Backend
+selection follows the platform, `%LOCALAPPDATA%\Lippy` is the Windows support
+directory, `daemon/models.py` fetches and unpacks the ONNX speech model
+resumably, `requirements-windows.txt` installs without touching an Apple-only
+wheel, and a `windows-2025-vs2026` job runs the suite plus one recording through
+the pipeline on every pull request. The README's Windows section covers install
+from source. **The pipeline works on Windows today.** What it does not have is a
+way to start it with your voice or put the result anywhere.
 
 ## Goal
 
-Get Lippy running on Windows from source: hold a key, speak, release, and clean
-text appears at the cursor. Ship at `cleanup_level: "clean"` so there is no
-model download beyond ASR and no LLM dependency. Polish stays opt-in and is
-Part 2's problem at the earliest.
+Hold a key, speak, release, and cleaned text appears at the cursor, on Windows.
+One process. Ship at `cleanup_level: "clean"`, which is already the default off
+Darwin, so no language model and no second download.
 
-**Windows is a single process.** The macOS daemon/app split exists only because
-macOS binds TCC permissions to a signed `.app`, which a venv interpreter cannot
-hold across rebuilds. Windows has no equivalent constraint, so there is no
-socket, no `lippyd`, no `protocol.py`. One Python process owns the tray, the
-hotkey, the microphone, the models and the paste. Do not port the daemon.
+**Windows is a single process.** The macOS daemon and app split exists only
+because macOS binds TCC permissions to a signed `.app`, which a venv interpreter
+cannot hold across rebuilds. Windows has no equivalent constraint, so there is no
+socket, no `lippyd`, and no `protocol.py`. Do not port the daemon.
 
 ## Read first
 
-- `daemon/rules.py`: the entire cleanup product below `polish`. Platform-neutral.
-- `daemon/config.py`: `CLEANUP_LEVELS`, `rule_config()`, and the macOS-bound
-  `SUPPORT_DIR` that needs a Windows branch (`%LOCALAPPDATA%`).
-- `daemon/asr.py`: `SherpaBackend` is already written and verified on macOS.
-- `daemon/polish.py`: `MlxEngine` / `OnnxEngine` split behind one `Polisher`.
-- `app/Sources/Lippy/AppDelegate.swift`: the state machine to mirror: hold,
-  latch, promote-mid-hold, abort-on-keypress, minimum-hold, latch cap.
-- `app/Sources/Lippy/TextInjector.swift`: clipboard save, paste, restore. The
-  approach ports. The API does not.
-- `.github/workflows/release.yml`: the existing macOS release job, for the
-  shape a Windows equivalent should take.
+Six macOS files, and what each one is for. The reasoning ports even where no
+line of the code does.
 
-## Recent-state recon (read before Phase 1)
+- `app/Sources/Lippy/HotkeyMonitor.swift` (165 lines): the entire state machine,
+  and the closest thing to a specification this work has. Three states, a
+  separately tracked latch flag, and four callbacks. Read it before writing
+  anything.
+- `app/Sources/Lippy/AppDelegate.swift`: the two guards the state machine hands
+  off to. `minimumHold` is 0.3s and applies to holds only, because a latched
+  session is deliberate however briefly it ran. `latchCap` is 300s, after which a
+  forgotten latched session is stopped rather than left recording the room.
+- `app/Sources/Lippy/AudioRecorder.swift`: capture at the hardware rate, convert
+  once on stop, and specifically `resample`, which has two branches for a reason.
+- `app/Sources/Lippy/TextInjector.swift`: clipboard save, paste, restore, and the
+  250ms delay before restoring. Also why synthesised typing was rejected.
+- `app/Sources/Lippy/Separator.swift`: `needed(after:inserting:)` is pure and
+  ports as-is. `characterBeforeCursor()` does not.
+- `app/Sources/Lippy/TextDestination.swift`: the three-way `Availability` answer
+  and the rule that only a confident "no" holds text back.
 
-**Streaming was deliberately removed, and sherpa-onnx offers it.**
-Commit `7c61f0a` (v0.4.0) removed a live transcription preview after it was
-used in earnest. The reason is in the README's *Declined* section: a streaming
-decoder continuously revises its own hypothesis, so displayed text rewrites
-itself mid-sentence and is unreadable while speaking. `sherpa-onnx` exposes an
-attractive streaming API. **Do not re-add it.** This is Chesterton's Fence with
-the note still nailed to it.
+## The shape: three threads and one seam
 
-## Pre-flight (cross-cutting, touches 3 of 10 surfaces)
+This is the decision the rest of the plan depends on, and it is forced by the
+first trap below rather than chosen for elegance.
 
-- **Runtime dependencies**: adds `sherpa-onnx`, `sounddevice`, a tray library
-  and Win32 bindings. Note `llama-cpp-python` was ruled out: zero Windows
-  wheels on PyPI.
-- **CI/CD workflows**: a new Windows job. This is the only place the code can
-  execute during development.
-- **External integrations**: Microsoft Store is Part 2, but the package
-  identity decision starts here.
+- **Main thread.** Tray icon, its menu, and a message loop. Owns nothing
+  time-critical.
+- **Hook thread, dedicated.** `SetWindowsHookEx(WH_KEYBOARD_LL, ...)` and its own
+  message loop. The callback timestamps the event, pushes it onto a queue, calls
+  `CallNextHookEx`, and returns. It does nothing else, ever.
+- **Worker thread.** Drains the queue, drives the state machine, and owns every
+  consequence: starting and stopping capture, running ASR, reading focus, and
+  pasting.
 
-**Environments that will run this code:** Windows on a GitHub Actions runner
-(headless, no audio device, no interactive desktop), and the author's own
-Windows laptop, which has real audio and a real keyboard. The interactive layer
-is testable. Use it early rather than at the end.
+**The seam is the state machine itself.** `HotkeyState` is a plain Python class
+that consumes `(kind, vk, scan_code, timestamp)` tuples and emits `begin`,
+`promote`, `end`, and `abort`. It imports nothing from Win32 and holds no
+handles, so the whole of the interaction logic, including both guards, is unit
+testable on macOS, on Linux, and in the existing CI job. Everything that cannot
+be tested on a runner is then a thin adapter with no decisions in it.
 
-**Rollback:** the Windows client is additive. Nothing in it can break the macOS
-build if `asr.py` and `polish.py` backend selection stays keyed off the platform
-rather than replaced.
+## Traps found while scoping
 
-## Phase 1, declare and wire the ONNX backends
+Six, and the first two are documented Windows behaviour rather than
+speculation. Both are silent, which is the failure mode this repository already
+knows it has a weakness for.
 
-**Landed.** Every item below is done.
+### 1. A slow hook is removed without telling you
 
-- ~~Declare the ONNX backends.~~ **Done before this plan started.**
-  `sherpa-onnx==1.13.6` and `onnxruntime-genai==0.15.2` are now pinned in
-  `daemon/requirements.txt`. What remains is splitting the macOS-only MLX pins
-  out so a Windows install does not try to build them.
-- Make backend selection platform-aware in `asr.py`'s `build()` and
-  `polish.py`'s `build_engine()`: default to `sherpa` / `onnx` off Darwin,
-  `parakeet` / `mlx` on it. Keep both importable everywhere so the macOS tests
-  still exercise the shared code.
-- Give `config.py` a Windows support directory (`%LOCALAPPDATA%\Lippy`) without
-  disturbing the macOS path, and keep the config migration path working.
-- Add the ONNX model bootstrap: download and unpack
-  `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8` (640 MB) into a cache directory,
-  resumable, with `LIPPY_ONNX_MODEL_DIR` as an override.
+From the `LowLevelKeyboardProc` documentation: the callback must finish inside
+the `LowLevelHooksTimeout` value under `HKEY_CURRENT_USER\Control Panel\Desktop`,
+and *"on Windows 7 and later, the hook is silently removed without being called.
+There is no way for the application to know whether the hook is removed."* Since
+Windows 10 version 1709 the system caps that timeout at 1000ms and commonly
+defaults far lower.
 
-## Phase 2. The Windows shell
+So the hotkey can simply stop working, mid-session, with no exception, no log
+line, and no error code, because something on the worker path once took too long
+on a busy machine. Microsoft's own advice in the same document is the
+architecture above: *"run the hooks on a dedicated thread that passes the work
+off to a worker thread and then immediately returns."*
 
-**Not started.** This is all that is left of Part 1.
+Two consequences. The callback does queue-push and nothing else, including no
+logging call that touches a file. And because loss is undetectable by asking,
+the app needs a **watchdog**: record the time of the last hook event, and if a
+long interval passes with none, tear down and re-install the hook and write that
+to the log. A user reporting "it just stopped working" must land in a log line
+that already knows why.
 
-- Tray icon with the same menu as macOS: the four cleanup levels, hotkey
-  binding, latch modifier, Copy Last Transcript, open config, open log, quit.
-- **Hotkey via a `WH_KEYBOARD_LL` low-level hook.** `RegisterHotKey` cannot
-  bind a bare modifier, and bare-modifier hold is the entire interaction.
-  Reproduce the full state machine from `AppDelegate.swift`: hold, latch chord,
-  promote-mid-hold keeping audio already captured, abort on another keypress
-  during a hold only, minimum-hold guard, latch cap.
-- **Do not default to Right Alt.** On international layouts it is AltGr and
-  produces characters. Pick a default that is inert on a US and a European
-  layout, and make it rebindable.
-- Audio capture via `sounddevice` at the device's native rate, resampled once on
-  stop. Port the group-averaging decimation from `AudioRecorder.swift`, not
-  naive sample-dropping: plain decimation aliases sibilants into the speech band.
-- Paste via clipboard save, `SendInput` Ctrl+V, restore after a delay. Mirror
-  `TextInjector.swift`'s reasoning, including why synthesized typing was
-  rejected.
-- **Port the separator decision.** Dictation arrives one utterance at a time, so
-  without it a second sentence lands hard against the first
-  ("Ship it Tuesday.The bug is fixed"). `Separator.needed(after:inserting:)` is
-  pure and ports as-is, and `--selftest-separator` covers it. What does not port
-  is the reading of the character before the cursor: macOS uses the
-  accessibility tree, and Windows needs its own route (UI Automation
-  `TextPattern`, or a fallback that declines to guess). Keep the fail-closed
-  behaviour: when the app will not say what precedes the cursor, add nothing. A
-  missing space is one keystroke to fix, a spurious leading space appears on the
-  first dictation into every such app.
-- Port the recovery panel: when no editable field has focus, hold the text and
-  offer a copy button rather than pasting into nothing. Carry the fail-open rule
-  with it, and `--selftest-destination` covers that rule the same way: an
-  unreadable answer from the accessibility layer is *unknown*, never "not
-  editable". Reading an error as a confident no is what made the macOS build
-  refuse to paste into windows that would have taken the text.
-- Keep both models resident for the life of the process. There is no daemon to
-  hold them, so the tray app is the warm process.
-- **Pin `onnxruntime` before shipping a build to anyone.** It arrives as a
-  transitive dependency of `sherpa-onnx` and nothing declares a version, so the
-  inference engine underneath the speech model is whatever pip resolved on the
-  day. Both platforms happen to sit on 1.29.0 as of 2026-08-26, which is luck
-  rather than a guarantee. An unpinned engine is how the same audio starts
-  decoding differently on two machines, and the divergence is invisible until
-  someone compares outputs on purpose.
+The same document notes the thread that installs the hook must have a message
+loop, which is why the hook thread has its own.
 
-## Phase 3, CI
+### 2. `GetAsyncKeyState` lies inside the callback
 
-**Landed and run.** First execution was the pull request that added it, and it
-passed. On `windows-2025-vs2026`: pip ignored all three MLX pins on their
-markers, `SUPPORT_DIR` resolved to `C:\Users\runneradmin\AppData\Local\Lippy`,
-the model fetched and unpacked on a cold cache, 104 tests passed, and the
-fixture transcribed to the same string macOS produces on both of its backends.
+Same document: *"the callback function is called before the asynchronous state of
+the key is updated. Consequently, the asynchronous state of the key cannot be
+determined by calling GetAsyncKeyState from within the callback function."*
 
-- A Windows job on `windows-2025-vs2026` that installs the requirements, runs
-  the full test suite, and exercises a file-through-the-pipeline smoke test
-  (the equivalent of `--selftest`) with a committed WAV fixture.
-- The suite must pass on both platforms. `rules.py` and the polish guards are
-  the shared contract and must not fork.
+The latch modifier's up or down state therefore has to be tracked from the event
+stream itself, which is exactly what `HotkeyMonitor` does with its own
+`latchDown` field rather than querying the system. Do not be tempted to simplify
+by asking Windows, because it will answer, and the answer will be one event
+stale.
+
+### 3. AltGr presses Left Control for you
+
+The brief already said not to default to Right Alt, because on international
+layouts it is AltGr and produces characters. Scoping turned up the other half:
+on a European layout, pressing AltGr makes Windows generate a **simulated
+`VK_LCONTROL` down alongside `VK_RMENU`**. It is distinguishable in a low level
+hook by its scan code, `0x21D` rather than `0x1D`, but that behaviour is
+undocumented and the scan code never reaches an ordinary `WM_KEYDOWN`. A default
+that rests on an undocumented workaround is not a good default.
+
+So **Right Alt and Left Control are both out**, and the default is **Right
+Control**, with **Right Shift** as the latch, both rebindable. Right Control is
+inert on its own on United States and European layouts, is present on
+essentially every keyboard, and is untouched by AltGr. Note that the abort rule
+then does the right thing for free, because Control plus C during a hold is a
+chord and not dictation.
+
+If a user rebinds the primary key to Left Control, the scan code check is the
+only mitigation available. It belongs in the adapter rather than the state
+machine, and it should be commented as undocumented behaviour so that a future
+reader knows it can lapse without warning.
+
+### 4. `SendInput` has no private modifier state
+
+`TextInjector` creates its event source with `CGEventSource(stateID:
+.privateState)` for a specific reason recorded in its comments: without it, a
+Shift still physically held turns the synthetic Command plus V into Command plus
+Shift plus V, which is paste-and-match-style in some apps and nothing at all in
+others.
+
+**Windows has no equivalent.** Synthetic input from `SendInput` merges with the
+real physical key state. This is not hypothetical here, because in latched mode
+the paste happens while the user may well be holding the primary key down, and
+the latch modifier is Right Shift.
+
+Before sending Control plus V, synthesise key-up for every modifier currently
+recorded as down, send the paste, and then leave the physical state alone, since
+the user's own key-up will arrive through the hook normally. Test it with the
+hotkey deliberately held.
+
+### 5. UI Automation can block for seconds
+
+A cross-process UI Automation call against a busy or unresponsive application can
+take a long time to return. The paste path must never wait on one. Give the focus
+check and the character-before-cursor read a hard timeout, and treat expiry as
+`unknown`, which is already the fail-open answer that `TextDestination` defines.
+Never call UI Automation from the hook thread.
+
+This preserves the existing rule rather than inventing one. Only a confident
+"not editable" holds text back. An unreadable answer pastes, because wrongly
+withholding text from a field that would have taken it is the worse failure, and
+this module has already made that mistake once.
+
+### 6. Do not reuse `load_wav`'s resampler for live capture
+
+`asr.load_wav` interpolates linearly at every ratio, which is fine for a file.
+Live capture is usually 48 kHz, which is the integer case, and
+`AudioRecorder.resample` deliberately **averages each group of samples** there
+because plain decimation folds everything above 8 kHz back into the speech band
+as aliasing, and sibilants are exactly what lands up there. Port both branches of
+the Swift function and cover them with golden data.
+
+Related, from the macOS history in the same file: an earlier design converted
+every buffer as it arrived and captured **nothing**, silently, because the
+resampler needed several buffers before it could emit any. The Windows shape of
+that failure is a `sounddevice` stream whose callback never fires or whose dtype
+is wrong. Assert a non-zero frame count on every stop and log buffer counts the
+way `AudioRecorder` already does.
+
+## Dependencies, and two packages to avoid
+
+Verified on PyPI 2026-08-26.
+
+- **`keyboard` 0.13.5, last released 2020-03-23.** Six years stale. It also
+  abstracts away the left and right distinction and the scan code that trap 3
+  needs. Do not use it.
+- **`pystray` 0.19.5, last released 2023-09-17.** Nearly three years stale, and a
+  message loop already exists for the tray to live on.
+
+Proposed additions, which is two:
+
+- **`sounddevice` 0.5.6** (2026-08-17, actively maintained, pure Python over
+  PortAudio) for capture. Already named in the original brief.
+- **`comtypes` 1.4.16** (2026-03-02) for the narrow slice of UI Automation this
+  needs. Preferred over `uiautomation` 2.0.29 (2025-08-05), which wraps far more
+  than is wanted here and is the staler of the two.
+
+Everything else is **`ctypes` against Win32 directly**, with no new dependency:
+the hook, `SendInput`, the clipboard, and `Shell_NotifyIcon` for the tray. That
+is deliberate. These are the parts needing exact control over flags and scan
+codes, they are the parts a wrapper would hide, and Part 2 has to put all of this
+inside an MSIX package where a smaller dependency surface is worth having.
+`pywin32` 312 (2026-06-04) is current and is a reasonable fallback if the ctypes
+tray proves tedious, but start without it.
+
+## Work, in order
+
+Ordered so each step is verifiable before the next one depends on it, and so the
+riskiest logic is the part that needs no Windows at all.
+
+**2a. The pure layer.** `HotkeyState`, the `resample` port, and
+`daemon/separator.py` carrying `needed(after, inserting)`. No Win32, no
+platform check, tested everywhere including the existing lean job. Port
+`Separator.runSelfTest`'s sixteen cases as hard-coded golden data. This is most
+of the risk and none of the platform.
+
+**2b. The hook adapter and its watchdog.** Dedicated thread, message loop,
+queue-push callback, re-install on silence. First step that only runs on the
+laptop. Instrument it before debugging it, per the constraint below.
+
+**2c. Capture.** `sounddevice` at the device's native rate, converted once on
+stop through the ported resampler, with the non-zero frame assertion.
+
+**2d. Paste.** Clipboard save, set, `SendInput` Control plus V, restore after a
+delay, and the modifier-clearing guard from trap 4. Verify with the hotkey held.
+
+**2e. Focus and separator.** UI Automation behind a timeout, mapping onto the
+existing three-way answer. Fail open.
+
+**2f. Tray, menu, recovery panel, warm process.** The four cleanup levels, hotkey
+binding, latch modifier, Copy Last Transcript, open config, open log, quit. Both
+models stay resident for the life of the process, because there is no daemon to
+hold them and the tray app is the warm process. When nothing editable has focus,
+hold the text and offer a copy button rather than pasting into nothing.
 
 ## Testing requirements
 
 Every new or modified module gets tests in the same phase as the code, meeting
-all six criteria: strict assertions (no `assertTrue`-shaped checks), no logic
-mirroring (hard-coded golden data), at least two sad paths per happy path,
-boundary and type stress, side-effect verification, and mock integrity
-including malformed responses.
+all six criteria: strict assertions, no logic mirroring, at least two sad paths
+per happy path, boundary and type stress, side-effect verification, and mock
+integrity including malformed responses. Put them in `tests/test_windows_*.py`.
 
-Put Windows tests in `tests/test_windows_*.py`, not appended to existing files.
+The state machine deserves more than a happy path. Cover at least: both press
+orders for the latch, promote mid-hold keeping audio already captured, a hold
+below `minimumHold` being discarded, a latched session ignoring unrelated
+keystrokes while a hold aborts on them, the second primary press ending a latched
+session even while the latch modifier is held, `latchCap` firing, and key repeat
+during a hold changing nothing.
 
-**What cannot be tested in CI, and must be labelled as such:** the hotkey hook,
-the tray, the paste, and real audio capture. A headless runner has no
-interactive desktop. Write these so the logic is unit-testable with the Win32
-calls behind a seam, and state plainly in the PR which paths have only ever run
-on a developer's assertion.
+**What cannot be tested in CI, and must be labelled as such in the pull request:**
+the hook, the tray, the paste, real audio capture, and every UI Automation read.
+A headless runner has no interactive desktop. State plainly which paths have only
+ever run on a developer's assertion.
 
 ## Deliverables
 
-1. Lippy runs on Windows from source and inserts text at the cursor.
-2. `requirements-windows.txt` with verified pins. The undeclared-dependency bug
-   is closed on both platforms.
-3. Platform-aware backend selection with the macOS path unchanged and its tests
-   still green.
-4. A Windows CI job that runs the suite and a pipeline smoke test.
-5. A README section covering Windows install from source, including the hotkey
-   default and why it differs from macOS.
+1. Lippy runs on Windows and inserts dictated text at the cursor.
+2. A hotkey that defaults to Right Control, is rebindable, and does not fire on
+   AltGr.
+3. The state machine as a platform-neutral, fully tested module.
+4. A tray icon with the same menu as macOS.
+5. README instructions covering the hotkey, the default, and how to change it.
 
 ## Constraints
 
 - Do not port the daemon, the socket, or `protocol.py`.
-- Do not re-add streaming (see recon above).
+- Do not re-add streaming. A decoder that revises its own hypothesis is
+  unreadable while you speak, it was built and removed once already, and the
+  reasoning is in the README's *Declined* section.
 - Do not fork `rules.py` or the polish guards. If Windows needs different
-  behaviour, it needs a parameter, not a copy.
+  behaviour it needs a parameter, not a copy. The same now applies to
+  `separator.py`.
 - Do not touch the macOS app target.
-- Write the logging first, not after the first mystery. The macOS build only
-  became debuggable once the app wrote its own log to disk, and every one of its
-  early failures was silent: a converter that returned zero frames without
-  erroring, an entitlement refused before the permission system was consulted,
-  an exception swallowed by the UI framework. Assume the Windows equivalents
-  exist and instrument for them from the first commit.
+- Do not do work inside the hook callback. See trap 1.
+- Write the logging first, not after the first mystery. Every early macOS failure
+  was silent, and traps 1 and 6 say the Windows ones will be too.
+- **Pin `onnxruntime` before shipping a build to anyone.** It arrives as a
+  transitive dependency of `sherpa-onnx` and nothing declares a version, so the
+  inference engine under the speech model is whatever pip resolved that day. Both
+  platforms sit on 1.29.0 as of 2026-08-26, which is luck rather than a
+  guarantee.
+
+## Verified
+
+- `LowLevelKeyboardProc` timeout, silent removal, the message loop requirement,
+  and the `GetAsyncKeyState` caveat: Microsoft Learn, retrieved 2026-08-26.
+- AltGr generating a simulated `VK_LCONTROL` with scan code `0x21D`, and that
+  distinction being undocumented and absent from `WM_KEYDOWN`: keymanapp pull
+  request 14909, read directly 2026-08-26.
+- Package versions and release dates: PyPI JSON API, 2026-08-26. `sounddevice`
+  0.5.6, `comtypes` 1.4.16, `pywin32` 312, `uiautomation` 2.0.29, `pystray`
+  0.19.5, `keyboard` 0.13.5.
