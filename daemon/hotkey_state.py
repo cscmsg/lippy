@@ -206,6 +206,7 @@ class HotkeyState:
 
         self._state = State.IDLE
         self._latch_down = False
+        self._primary_down = False
         self._began_at = 0.0
         self._latched_at = 0.0
 
@@ -230,9 +231,15 @@ class HotkeyState:
         and the events that went missing while it was gone may well include the
         key coming back up. Starting from idle is the only state that cannot be
         wrong afterwards.
+
+        The primary flag makes this load bearing rather than tidy. A key whose
+        release went missing stays recorded as down, and every later press of
+        it reads as a repeat, so the hotkey would go quiet for the life of the
+        process. The adapter calls this whenever it reinstalls.
         """
         self._state = State.IDLE
         self._latch_down = False
+        self._primary_down = False
         self._began_at = 0.0
         self._latched_at = 0.0
 
@@ -273,16 +280,27 @@ class HotkeyState:
 
     def _handle_primary(self, event: KeyEvent) -> tuple[Action, ...]:
         if event.kind is EventKind.DOWN:
+            if self._primary_down:
+                # Key repeat. Windows sends a stream of downs while a key is
+                # physically held, and they mean nothing the first press did
+                # not already say.
+                #
+                # This is tested before the states below rather than inside one
+                # of them, because a repeat is not a second press in any state.
+                # Reading it as one made a latched session end and restart at
+                # the repeat rate for as long as the key stayed down, which
+                # running the hook on a real keyboard turned up and which the
+                # tests here had missed by feeding the machine one down per
+                # intended press.
+                return ()
+            self._primary_down = True
             if self._state is State.LATCHED:
-                # Checked first, so a second press ends a latched session even
-                # if the latch modifier happens to be held down again.
+                # A genuine second press, which by the guard above means the
+                # key came up in between. It ends the session even if the latch
+                # modifier happens to be held down again.
                 self._state = State.IDLE
                 log.info("latched capture ended by a second press")
                 return (Action.END,)
-            if self._state is State.HOLDING:
-                # Key repeat. Windows sends these while a key is held, and they
-                # mean nothing that the first press did not already say.
-                return ()
             self._began_at = event.timestamp
             if self._latch_down:
                 self._state = State.LATCHED
@@ -293,6 +311,7 @@ class HotkeyState:
             log.info("capture begun, held")
             return (Action.BEGIN_HOLD,)
 
+        self._primary_down = False
         if self._state is State.HOLDING:
             self._state = State.IDLE
             held = event.timestamp - self._began_at

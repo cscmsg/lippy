@@ -235,12 +235,24 @@ class Clock:
         return self.now
 
 
-def dispatcher(machine=None, clock=None, on_raw=None):
+def dispatcher(machine=None, clock=None, on_raw=None, installs=None):
     events: queue.SimpleQueue = queue.SimpleQueue()
     seen = []
     pump = hook.Dispatcher(machine or HotkeyState(VK_RCONTROL, VK_RSHIFT),
-                           events, seen.append, clock or Clock(), on_raw)
+                           events, seen.append, clock or Clock(), on_raw,
+                           installs)
     return pump, events, seen
+
+
+class Installs:
+    """Stands in for the hook's install counter, which the drain loop reads to
+    find out that events went missing under it."""
+
+    def __init__(self, count=1):
+        self.count = count
+
+    def __call__(self):
+        return self.count
 
 
 def test_an_empty_queue_emits_nothing():
@@ -366,3 +378,99 @@ def test_describe_marks_our_own_input_as_ours():
     line = hook.describe(hook.WM_KEYDOWN, VK_RCONTROL, 0x1D, 0,
                          hook.SYNTHETIC_TAG, 1.0)
     assert "ours" in line
+
+
+# ---- resetting the machine when the hook is reinstalled under it ----------
+#
+# The watchdog reinstalls a hook that Windows may have removed silently. Events
+# went missing for as long as it was gone, and one of them may be the key
+# coming up, which the machine would otherwise go on believing is held.
+
+
+def test_a_reinstall_between_pumps_clears_a_capture_in_progress(caplog):
+    machine = HotkeyState(VK_RCONTROL, VK_RSHIFT)
+    installs = Installs(1)
+    pump, events, seen = dispatcher(machine=machine, installs=installs)
+    events.put(record(message=hook.WM_KEYDOWN, at=1.0))
+    pump.pump(timeout=0.0)
+    assert machine.recording is True
+
+    installs.count = 2
+    with caplog.at_level(logging.INFO, logger="lippy.hook"):
+        pump.pump(timeout=0.0)
+    assert machine.recording is False
+    assert "reinstalled during a capture" in caplog.text
+
+
+def test_a_reinstall_lets_the_next_press_work_after_a_release_went_missing():
+    """The wedge this exists to prevent. Without the reset the key stays
+    recorded as down and every later press reads as a repeat."""
+    machine = HotkeyState(VK_RCONTROL, VK_RSHIFT)
+    installs = Installs(1)
+    pump, events, seen = dispatcher(machine=machine, installs=installs)
+    events.put(record(message=hook.WM_KEYDOWN, at=1.0))
+    pump.pump(timeout=0.0)
+
+    installs.count = 2
+    pump.pump(timeout=0.0)
+    events.put(record(message=hook.WM_KEYDOWN, at=9.0))
+    events.put(record(message=hook.WM_KEYUP, at=10.0))
+    pump.pump(timeout=0.0)
+    assert seen == [Action.BEGIN_HOLD, Action.BEGIN_HOLD, Action.END]
+
+
+def test_no_reinstall_leaves_a_capture_alone():
+    machine = HotkeyState(VK_RCONTROL, VK_RSHIFT)
+    pump, events, seen = dispatcher(machine=machine, installs=Installs(4))
+    events.put(record(message=hook.WM_KEYDOWN, at=1.0))
+    pump.pump(timeout=0.0)
+    pump.pump(timeout=0.0)
+    pump.pump(timeout=0.0)
+    assert machine.recording is True
+    assert seen == [Action.BEGIN_HOLD]
+
+
+def test_a_reinstall_while_idle_says_nothing(caplog):
+    machine = HotkeyState(VK_RCONTROL, VK_RSHIFT)
+    installs = Installs(1)
+    pump, _, seen = dispatcher(machine=machine, installs=installs)
+    installs.count = 2
+    with caplog.at_level(logging.INFO, logger="lippy.hook"):
+        assert pump.pump(timeout=0.0) == 0
+    assert "reinstalled during a capture" not in caplog.text
+    assert seen == []
+
+
+def test_the_counter_is_read_once_at_construction_so_the_first_pump_is_quiet():
+    """A dispatcher built after the hook installed must not treat that first
+    install as a reinstall, which would reset a machine nobody had used yet."""
+    machine = HotkeyState(VK_RCONTROL, VK_RSHIFT)
+    pump, events, seen = dispatcher(machine=machine, installs=Installs(7))
+    events.put(record(message=hook.WM_KEYDOWN, at=1.0))
+    events.put(record(message=hook.WM_KEYUP, at=2.0))
+    assert pump.pump(timeout=0.0) == 2
+    assert seen == [Action.BEGIN_HOLD, Action.END]
+
+
+def test_a_dispatcher_with_no_install_counter_never_resets():
+    """The counter is optional, because the state machine tests drive a
+    dispatcher that has no hook behind it at all."""
+    machine = HotkeyState(VK_RCONTROL, VK_RSHIFT)
+    pump, events, _ = dispatcher(machine=machine)
+    events.put(record(message=hook.WM_KEYDOWN, at=1.0))
+    pump.pump(timeout=0.0)
+    pump.pump(timeout=0.0)
+    assert machine.recording is True
+
+
+def test_an_install_counter_that_goes_backwards_still_counts_as_a_change():
+    """Nothing promises the count only rises. A change of any direction means
+    the hook is not the one the machine was tracking."""
+    machine = HotkeyState(VK_RCONTROL, VK_RSHIFT)
+    installs = Installs(5)
+    pump, events, _ = dispatcher(machine=machine, installs=installs)
+    events.put(record(message=hook.WM_KEYDOWN, at=1.0))
+    pump.pump(timeout=0.0)
+    installs.count = 2
+    pump.pump(timeout=0.0)
+    assert machine.recording is False
