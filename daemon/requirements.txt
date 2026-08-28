@@ -17,5 +17,23 @@ soundfile==0.14.0
 # source on a runner, so a missing wheel is a hard stop rather than a slow job.
 sherpa-onnx==1.13.6
 onnxruntime-genai==0.15.2
+
+# The inference engine under the speech model, pinned because it was arriving
+# unpinned. onnxruntime-genai asks for `onnxruntime>=1.28.0` and nothing else
+# names a version, so until now the engine was whatever pip resolved on the day,
+# and the two platforms agreed by luck. The plan filed this against the Windows
+# shell, and it is the one item there that has to be true before a build reaches
+# anybody.
+#
+# Note where it actually comes from, because the plan had this wrong: the
+# dependency is onnxruntime-genai's, not sherpa-onnx's. sherpa-onnx 1.13.6
+# depends only on sherpa-onnx-core, which declares no requirements at all and
+# carries its own runtime inside the wheel. Removing the polish engine would
+# therefore not remove this pin's reason to exist.
+#
+# Verified: onnxruntime 1.29.0 is the current release, published 2026-08-17, and
+# ships cp312 wheels for both win_amd64 and macosx_14_0_arm64 -- PyPI JSON API,
+# 2026-08-27. It is also the version both platforms already had.
+onnxruntime==1.29.0
 numpy==2.5.2
 pytest==9.1.1
