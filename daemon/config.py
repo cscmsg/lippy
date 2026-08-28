@@ -102,6 +102,18 @@ class Config:
     # that a local-first tool has no reason to create.
     history_size: int = 20
 
+    # The Windows hotkey, by the name the tray menu shows. macOS does not read
+    # these: there the Swift app owns the hotkey and keeps its choice in
+    # UserDefaults, because the app rather than the Python holds the keyboard.
+    # Two stores while that is true is more honest than one store that only one
+    # platform obeys.
+    #
+    # Right Control is the default for the reason recorded in hotkey_state: Right
+    # Alt is AltGr on international layouts, and AltGr also synthesises a Left
+    # Control, so both of those are out. An empty latch_key turns latching off.
+    hotkey: str = "Right Control"
+    latch_key: str = "Right Shift"
+
     @classmethod
     def load(cls, path: pathlib.Path = CONFIG_PATH) -> "Config":
         if not path.exists():
@@ -160,6 +172,34 @@ class Config:
             spoken_commands=self.spoken_commands,
             dictionary=self.dictionary,
         )
+
+
+    def hotkey_vks(self) -> tuple[int, int | None]:
+        """The configured hotkey as virtual key codes, falling back loudly.
+
+        Warns and uses the default rather than refusing to start, the same way
+        an unknown cleanup_level does. A tool that will not launch because one
+        setting is misspelled is a worse failure than one that launches on the
+        default and says so, and here the failure would take the whole hotkey
+        with it.
+        """
+        from hotkey_state import DEFAULT_LATCH_VK, DEFAULT_PRIMARY_VK, KEYS
+
+        primary = KEYS.get(self.hotkey)
+        if primary is None:
+            log.warning("unknown hotkey %r; falling back to Right Control. "
+                        "Known keys: %s", self.hotkey, ", ".join(KEYS))
+            primary = DEFAULT_PRIMARY_VK
+
+        if not self.latch_key:
+            return primary, None
+
+        latch = KEYS.get(self.latch_key)
+        if latch is None:
+            log.warning("unknown latch_key %r; falling back to Right Shift. "
+                        "Known keys: %s", self.latch_key, ", ".join(KEYS))
+            latch = DEFAULT_LATCH_VK
+        return primary, latch
 
 
 def socket_path() -> pathlib.Path:
