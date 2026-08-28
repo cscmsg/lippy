@@ -38,6 +38,14 @@ last item this plan carried against shipping a build. Note for anyone reading
 the old wording: it arrives through `onnxruntime-genai`, not `sherpa-onnx`,
 whose wheel carries its own runtime.
 
+The hook adapter is written, in cscmsg/lippy#7, and is the one thing in this
+list that has landed **without having run**. `daemon/windows_hook.py` holds the
+hook thread, the queue-push callback, the watchdog and the drain loop, and
+`config.py` now carries `hotkey` and `latch_key` as names resolved through
+`hotkey_state.KEYS`. Everything in it that decides anything is tested. Nothing
+in it that talks to Win32 has executed, which is what step 2b-verify below is
+for. Do not build 2c on top of it before that has been done.
+
 ## Goal
 
 Hold a key, speak, release, and cleaned text appears at the cursor, on Windows.
@@ -156,6 +164,12 @@ only mitigation available. It belongs in the adapter rather than the state
 machine, and it should be commented as undocumented behaviour so that a future
 reader knows it can lapse without warning.
 
+That check now exists, as `ALTGR_LCONTROL_SCAN` in `daemon/windows_hook.py`, and
+it is the weakest line in this whole plan. The Keyman code the `0x21D` came from
+was reading the `lParam` encoding of an ordinary key message, and a hook receives
+a `scanCode` field and an extended flag instead. Those are not obliged to agree,
+and nobody has looked. Step 2b-verify is the measurement.
+
 ### 4. `SendInput` has no private modifier state
 
 `TextInjector` creates its event source with `CGEventSource(stateID:
@@ -239,9 +253,31 @@ to it.
 Everything from here runs only on the laptop. None of it can be covered on a
 runner, so each step below says what it owes the reader instead.
 
-**2b. The hook adapter and its watchdog.** Dedicated thread, message loop,
-queue-push callback, re-install on silence. First step that only runs on the
-laptop. Instrument it before debugging it, per the constraint below.
+**2b-verify. Run the hook on a real keyboard.** The code landed in
+cscmsg/lippy#7 and has never executed. Nothing below it should be built on top
+of an adapter nobody has watched work, so this is the next thing to do and it
+takes a laptop, not a session.
+
+```
+python daemon/windows_hook.py --raw
+```
+
+Four things to find out, in the order they will bite:
+
+1. **Does the hotkey register at all.** Hold Right Control and look for
+   `begin_hold` then `end`. If nothing appears, the hook did not install and the
+   thread will have logged why.
+2. **What AltGr actually sends.** Press it and read the raw line.
+   `ALTGR_LCONTROL_SCAN` is set to `0x21D` from a Keyman pull request that was
+   reading a different encoding, and this is the measurement that either
+   confirms it or replaces it. Note the `scan` and `extended` fields for both
+   the Left Control and the Right Alt that arrive together.
+3. **Whether the watchdog is quiet when it should be.** Leave it running for a
+   few minutes without typing. Expect one INFO line about reinstalling and then
+   nothing, not a line every thirty seconds.
+4. **Whether anything is swallowed.** Type normally with the diagnostic running.
+   Every key must still reach the application underneath, because the callback
+   returns `CallNextHookEx` and is not supposed to consume anything.
 
 **2c. Capture.** `sounddevice` at the device's native rate, converted once on
 stop through the ported resampler, with the non-zero frame assertion.
