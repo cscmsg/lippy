@@ -10,6 +10,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "daemon"))
 
 import json
+import logging
 
 import pytest
 import config
@@ -155,3 +156,56 @@ def test_save_round_trips_a_windows_config(monkeypatch, tmp_path):
     assert written["asr_backend"] == "sherpa"
     assert written["cleanup_level"] == "clean"
     assert config.Config.load(path).asr_backend == "sherpa"
+
+
+# ---- the Windows hotkey binding ------------------------------------------
+
+def test_the_default_binding_is_right_control_and_right_shift():
+    """Right Alt is AltGr and Left Control is what AltGr fakes, so the default
+    is the one modifier that is inert on its own and untouched by either."""
+    assert config.Config().hotkey_vks() == (0xA3, 0xA1)
+
+
+def test_a_configured_binding_resolves_to_its_virtual_key_codes():
+    cfg = config.Config(hotkey="Left Alt", latch_key="Left Shift")
+    assert cfg.hotkey_vks() == (0xA4, 0xA0)
+
+
+def test_an_empty_latch_key_turns_latching_off():
+    assert config.Config(latch_key="").hotkey_vks() == (0xA3, None)
+
+
+def test_an_unknown_hotkey_warns_and_falls_back_rather_than_refusing(caplog):
+    """Refusing to start over one misspelled setting would take the whole
+    hotkey with it, which is worse than starting on the default and saying so."""
+    cfg = config.Config(hotkey="Super Key")
+    with caplog.at_level(logging.WARNING, logger="lippy.config"):
+        assert cfg.hotkey_vks() == (0xA3, 0xA1)
+    assert "unknown hotkey" in caplog.text
+    assert "Right Control" in caplog.text
+
+
+def test_an_unknown_latch_key_falls_back_on_its_own(caplog):
+    cfg = config.Config(hotkey="Left Alt", latch_key="Middle Shift")
+    with caplog.at_level(logging.WARNING, logger="lippy.config"):
+        assert cfg.hotkey_vks() == (0xA4, 0xA1)
+    assert "unknown latch_key" in caplog.text
+
+
+def test_the_binding_survives_a_save_and_load(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "win32")
+    path = tmp_path / "config.json"
+    config.Config(hotkey="Left Control", latch_key="").save(path)
+    loaded = config.Config.load(path)
+    assert (loaded.hotkey, loaded.latch_key) == ("Left Control", "")
+    assert loaded.hotkey_vks() == (0xA2, None)
+
+
+def test_every_bindable_key_resolves():
+    """A name the tray menu can offer that config cannot resolve would be a
+    setting the user can choose and the hotkey cannot honour."""
+    import hotkey_state
+
+    for name in hotkey_state.KEYS:
+        primary, _ = config.Config(hotkey=name).hotkey_vks()
+        assert primary == hotkey_state.KEYS[name], name
