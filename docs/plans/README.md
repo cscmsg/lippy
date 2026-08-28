@@ -13,5 +13,5 @@ has outlived its purpose and belongs in the README instead.
 
 | Plan | Status |
 |---|---|
-| [Windows, Part 1: the client](windows-client.md) | the shell, scoped and not started. Phases 1 and 3 shipped |
+| [Windows, Part 1: the client](windows-client.md) | the hook, the tray and the paste. Phases 1 and 3 shipped, and so has the shell's pure layer |
 | [Windows, Part 2: packaging and distribution](windows-packaging.md) | not started, waiting on Part 1 phase 2 |

@@ -1,10 +1,11 @@
 # Lippy on Windows, Part 1 of 2: the client
 
 *A work brief, not documentation of something that exists. Originally written
-2026-08-25 covering three phases. Phases 1 and 3 shipped on 2026-08-26 and their
-sections have been removed, because a plan describing something that already
-ships has outlived its purpose. What is left here is the Windows shell, which is
-the whole remainder of Part 1. Re-scoped 2026-08-26.*
+2026-08-25 covering three phases. Phases 1 and 3 shipped on 2026-08-26, and step
+2a of the shell shipped on 2026-08-27. Their sections have been removed, because
+a plan describing something that already ships has outlived its purpose. What is
+left here is the part of the Windows shell that touches Windows. Re-scoped
+2026-08-27.*
 
 ## Already landed, so you can skip it
 
@@ -16,6 +17,26 @@ wheel, and a `windows-2025-vs2026` job runs the suite plus one recording through
 the pipeline on every pull request. The README's Windows section covers install
 from source. **The pipeline works on Windows today.** What it does not have is a
 way to start it with your voice or put the result anywhere.
+
+The pure layer is done too, in cscmsg/lippy#6, which was step 2a. Three modules
+and 110 tests, all of which run on the lean job as well as the Windows one:
+
+- `daemon/hotkey_state.py` is the state machine, the two guards included. Feed
+  it `KeyEvent`s and it returns `Action`s. Call `tick(now)` from the drain loop,
+  because that is what enforces the latch cap.
+- `daemon/audio.py` is `resample`, both branches, standard library only.
+- `daemon/separator.py` is `needed(after, inserting)` and `prepare`, carrying the
+  sixteen cases from `Separator.runSelfTest` as golden data.
+
+One rule was decided there rather than here, so do not re-litigate it in the
+adapter: **modifiers do not abort a hold, struck keys do.** On macOS that falls
+out of the event types. A low level hook sees everything, so it had to be said
+out loud. It is the `chord_exempt_vks` parameter.
+
+`onnxruntime` is pinned at 1.29.0 in the same pull request, which closes the
+last item this plan carried against shipping a build. Note for anyone reading
+the old wording: it arrives through `onnxruntime-genai`, not `sherpa-onnx`,
+whose wheel carries its own runtime.
 
 ## Goal
 
@@ -30,23 +51,21 @@ socket, no `lippyd`, and no `protocol.py`. Do not port the daemon.
 
 ## Read first
 
-Six macOS files, and what each one is for. The reasoning ports even where no
-line of the code does.
+Four macOS files and one Python one, and what each is for. The reasoning ports
+even where no line of the code does.
 
-- `app/Sources/Lippy/HotkeyMonitor.swift` (165 lines): the entire state machine,
-  and the closest thing to a specification this work has. Three states, a
-  separately tracked latch flag, and four callbacks. Read it before writing
-  anything.
-- `app/Sources/Lippy/AppDelegate.swift`: the two guards the state machine hands
-  off to. `minimumHold` is 0.3s and applies to holds only, because a latched
-  session is deliberate however briefly it ran. `latchCap` is 300s, after which a
-  forgotten latched session is stopped rather than left recording the room.
-- `app/Sources/Lippy/AudioRecorder.swift`: capture at the hardware rate, convert
-  once on stop, and specifically `resample`, which has two branches for a reason.
+- `daemon/hotkey_state.py`: the state machine, already ported and already
+  tested. The adapter's whole job is to feed it. Read it before writing the
+  hook, and read `HotkeyMonitor.swift` alongside it only if you want the
+  original, which is where its comments point.
+- `app/Sources/Lippy/AudioRecorder.swift`: capture at the hardware rate and
+  convert once on stop. The conversion itself is now `daemon/audio.py`, so what
+  is left to take from here is the tap arrangement and the buffer counting in
+  `stop`, which exists because of the silent failure recorded in trap 6.
 - `app/Sources/Lippy/TextInjector.swift`: clipboard save, paste, restore, and the
   250ms delay before restoring. Also why synthesised typing was rejected.
-- `app/Sources/Lippy/Separator.swift`: `needed(after:inserting:)` is pure and
-  ports as-is. `characterBeforeCursor()` does not.
+- `app/Sources/Lippy/Separator.swift`: `characterBeforeCursor()`, which is the
+  half that did not port. The decision it feeds is `daemon/separator.py`.
 - `app/Sources/Lippy/TextDestination.swift`: the three-way `Availability` answer
   and the rule that only a confident "no" holds text back.
 
@@ -64,12 +83,13 @@ first trap below rather than chosen for elegance.
   consequence: starting and stopping capture, running ASR, reading focus, and
   pasting.
 
-**The seam is the state machine itself.** `HotkeyState` is a plain Python class
-that consumes `(kind, vk, scan_code, timestamp)` tuples and emits `begin`,
-`promote`, `end`, and `abort`. It imports nothing from Win32 and holds no
-handles, so the whole of the interaction logic, including both guards, is unit
-testable on macOS, on Linux, and in the existing CI job. Everything that cannot
-be tested on a runner is then a thin adapter with no decisions in it.
+**The seam is the state machine itself**, and it exists now. `HotkeyState`
+consumes `KeyEvent(kind, vk, scan_code, timestamp)` and returns actions. It
+imports nothing from Win32 and holds no handles, so the whole of the interaction
+logic, both guards included, is already tested on macOS, on Linux, and in the
+existing CI job. What remains is a thin adapter, and the measure of whether it
+is thin enough is whether it contains a decision that could have been tested and
+was not.
 
 ## Traps found while scoping
 
@@ -167,16 +187,15 @@ This preserves the existing rule rather than inventing one. Only a confident
 withholding text from a field that would have taken it is the worse failure, and
 this module has already made that mistake once.
 
-### 6. Do not reuse `load_wav`'s resampler for live capture
+### 6. A capture that records nothing looks exactly like one that works
 
-`asr.load_wav` interpolates linearly at every ratio, which is fine for a file.
-Live capture is usually 48 kHz, which is the integer case, and
-`AudioRecorder.resample` deliberately **averages each group of samples** there
-because plain decimation folds everything above 8 kHz back into the speech band
-as aliasing, and sibilants are exactly what lands up there. Port both branches of
-the Swift function and cover them with golden data.
+The resampler half of this trap is closed: `daemon/audio.py` has both branches
+and the golden data, and `asr.load_wav`'s linear-at-every-ratio version stays
+where it is, for files. Call `audio.resample` from the capture path and the
+aliasing question is settled. What is left is the half that only bites on a real
+microphone.
 
-Related, from the macOS history in the same file: an earlier design converted
+From the macOS history in `AudioRecorder.swift`: an earlier design converted
 every buffer as it arrived and captured **nothing**, silently, because the
 resampler needed several buffers before it could emit any. The Windows shape of
 that failure is a `sounddevice` stream whose callback never fires or whose dtype
@@ -212,13 +231,13 @@ tray proves tedious, but start without it.
 ## Work, in order
 
 Ordered so each step is verifiable before the next one depends on it, and so the
-riskiest logic is the part that needs no Windows at all.
+riskiest logic is the part that needs no Windows at all. That part was 2a and it
+has shipped, which is why the list now starts part way through. The lettering is
+left alone rather than closed up, because the pull requests and the commits refer
+to it.
 
-**2a. The pure layer.** `HotkeyState`, the `resample` port, and
-`daemon/separator.py` carrying `needed(after, inserting)`. No Win32, no
-platform check, tested everywhere including the existing lean job. Port
-`Separator.runSelfTest`'s sixteen cases as hard-coded golden data. This is most
-of the risk and none of the platform.
+Everything from here runs only on the laptop. None of it can be covered on a
+runner, so each step below says what it owes the reader instead.
 
 **2b. The hook adapter and its watchdog.** Dedicated thread, message loop,
 queue-push callback, re-install on silence. First step that only runs on the
@@ -246,12 +265,10 @@ all six criteria: strict assertions, no logic mirroring, at least two sad paths
 per happy path, boundary and type stress, side-effect verification, and mock
 integrity including malformed responses. Put them in `tests/test_windows_*.py`.
 
-The state machine deserves more than a happy path. Cover at least: both press
-orders for the latch, promote mid-hold keeping audio already captured, a hold
-below `minimumHold` being discarded, a latched session ignoring unrelated
-keystrokes while a hold aborts on them, the second primary press ending a latched
-session even while the latch modifier is held, `latchCap` firing, and key repeat
-during a hold changing nothing.
+The state machine's own list is done and lives in `tests/test_windows_hotkey.py`.
+Do not repeat those cases against the adapter. The adapter's tests are about
+whether events reach the machine and whether actions leave it, which is a
+different question from whether the machine is right.
 
 **What cannot be tested in CI, and must be labelled as such in the pull request:**
 the hook, the tray, the paste, real audio capture, and every UI Automation read.
@@ -263,9 +280,10 @@ ever run on a developer's assertion.
 1. Lippy runs on Windows and inserts dictated text at the cursor.
 2. A hotkey that defaults to Right Control, is rebindable, and does not fire on
    AltGr.
-3. The state machine as a platform-neutral, fully tested module.
-4. A tray icon with the same menu as macOS.
-5. README instructions covering the hotkey, the default, and how to change it.
+3. A tray icon with the same menu as macOS.
+4. README instructions covering the hotkey, the default, and how to change it.
+
+Delivered already: the state machine as a platform-neutral, fully tested module.
 
 ## Constraints
 
@@ -275,16 +293,15 @@ ever run on a developer's assertion.
   reasoning is in the README's *Declined* section.
 - Do not fork `rules.py` or the polish guards. If Windows needs different
   behaviour it needs a parameter, not a copy. The same now applies to
-  `separator.py`.
+  `separator.py`, `audio.py` and `hotkey_state.py`, which is why the abort
+  exemption and both guards are constructor arguments.
 - Do not touch the macOS app target.
 - Do not do work inside the hook callback. See trap 1.
+- Do not put a decision in the adapter. If the hook, the tray or the paste path
+  grows a rule about what a key means, it belongs in `hotkey_state.py` where it
+  can be tested, and the adapter should be passing it a parameter instead.
 - Write the logging first, not after the first mystery. Every early macOS failure
   was silent, and traps 1 and 6 say the Windows ones will be too.
-- **Pin `onnxruntime` before shipping a build to anyone.** It arrives as a
-  transitive dependency of `sherpa-onnx` and nothing declares a version, so the
-  inference engine under the speech model is whatever pip resolved that day. Both
-  platforms sit on 1.29.0 as of 2026-08-26, which is luck rather than a
-  guarantee.
 
 ## Verified
 
@@ -296,3 +313,7 @@ ever run on a developer's assertion.
 - Package versions and release dates: PyPI JSON API, 2026-08-26. `sounddevice`
   0.5.6, `comtypes` 1.4.16, `pywin32` 312, `uiautomation` 2.0.29, `pystray`
   0.19.5, `keyboard` 0.13.5.
+- `onnxruntime` 1.29.0 is the current release, published 2026-08-17, with cp312
+  wheels for `win_amd64` and `macosx_14_0_arm64`: PyPI JSON API, 2026-08-27. That
+  it reaches the tree through `onnxruntime-genai` rather than `sherpa-onnx` was
+  read from the installed package metadata the same day.
