@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+import digits as digits_mod
 import terms as terms_mod
 
 # Non-lexical fillers only. These are never meaningful words in English, so
@@ -58,6 +59,9 @@ class RuleConfig:
     dictionary: dict[str, str] = field(default_factory=dict)
     protected_terms: list[str] = field(default_factory=list)
     fuzzy_threshold: float = terms_mod.DEFAULT_THRESHOLD
+    spoken_numbers: bool = False
+    number_word_max: int = 12
+    digit_triggers: list[str] = field(default_factory=list)
 
 
 def _strip_fillers(text: str, cfg: RuleConfig) -> str:
@@ -184,4 +188,10 @@ def clean(text: str, cfg: RuleConfig | None = None) -> str:
                                join_urls=cfg.spoken_urls)
     if cfg.dictionary:
         text = _apply_dictionary(text, cfg.dictionary)
+    # Numbers run last of the substituting passes, because a trigger phrase is
+    # often something the dictionary just finished repairing.
+    if cfg.spoken_numbers:
+        text = digits_mod.convert(text, digits_mod.NumberConfig(
+            enabled=True, word_max=cfg.number_word_max,
+            triggers=cfg.digit_triggers))
     return _tidy(text)
