@@ -23,6 +23,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import asr
 import config as config_mod
 import protocol
+import terms as terms_mod
 from asr import load_wav  # noqa: F401  (kept importable from here)
 
 SAMPLE_RATE = 16_000
@@ -99,6 +100,63 @@ def cmd_last(args) -> int:
     return 0
 
 
+# How many collisions before an entry is called out rather than just reported.
+NOISY_TERM = 5
+
+
+def cmd_terms(args) -> int:
+    """Report what each protected term would rewrite, before it is trusted.
+
+    A protected term is a fuzzy match, so its safety is a property of the term
+    and not of the setting. This measures it against the system word list rather
+    than leaving it to be discovered in pasted text.
+    """
+    cfg = config_mod.Config.load()
+    entries = args.check or cfg.protected_terms
+    threshold = args.threshold or cfg.fuzzy_threshold
+
+    if not entries:
+        print("no protected_terms configured\n"
+              f"add some to {config_mod.CONFIG_PATH}, or pass --check to try one")
+        return 0
+
+    words = terms_mod.load_wordlist()
+    if words is None:
+        # Saying so beats printing a clean bill of health this cannot support.
+        print("no system word list on this platform "
+              f"(looked in {', '.join(terms_mod.WORDLIST_PATHS)})")
+        print("terms are listed without a collision count:\n")
+        for entry in entries:
+            print(f"  {entry}")
+        return 1
+
+    relaxed = terms_mod.url_threshold(threshold)
+    print(f"{len(words):,} words, prose threshold {threshold:.2f}, "
+          f"host threshold {relaxed:.2f}\n")
+
+    worst = 0
+    for entry in entries:
+        hits = terms_mod.audit(entry, words, threshold)
+        in_hosts = terms_mod.audit(entry, words, relaxed)
+        worst = max(worst, len(hits))
+        if not hits:
+            note = "clear"
+        else:
+            shown = ", ".join(hits[:6]) + (", ..." if len(hits) > 6 else "")
+            note = f"{len(hits)} would be rewritten: {shown}"
+        flag = "  " if len(hits) < NOISY_TERM else "! "
+        print(f"{flag}{entry:<24} {note}")
+        if len(in_hosts) != len(hits):
+            print(f"  {'':<24} {len(in_hosts)} inside a hostname")
+
+    if worst >= NOISY_TERM:
+        print(f"\nEntries marked ! collide with {NOISY_TERM} or more real words. "
+              f"A term that looks like ordinary English is a poor protected term, "
+              f"and raising the threshold trades away the mis-hearings it was "
+              f"added to catch. Prefer a dictionary entry for those.")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Lippy CLI")
     parser.add_argument("--socket", type=pathlib.Path, default=config_mod.socket_path())
@@ -115,6 +173,12 @@ def main() -> int:
     p_file.add_argument("--app", help="pretend the text is destined for this app")
     p_file.add_argument("--json", action="store_true")
     p_file.set_defaults(fn=cmd_file)
+
+    p_terms = sub.add_parser("terms", help="audit protected terms for collisions")
+    p_terms.add_argument("--check", action="append", metavar="TERM",
+                         help="audit this term instead of the configured ones")
+    p_terms.add_argument("--threshold", type=float, default=None)
+    p_terms.set_defaults(fn=cmd_terms)
 
     p_last = sub.add_parser("last", help="recent utterances held in daemon memory")
     p_last.add_argument("-n", "--count", type=int, default=10)

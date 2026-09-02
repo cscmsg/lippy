@@ -28,7 +28,7 @@ hold Right Option
    ↓  AVAudioEngine → 16 kHz mono Float32
    ↓  unix socket (newline-delimited JSON, base64 PCM)
    ↓  Parakeet TDT 0.6B v3          ~200ms   speech → text
-   ↓  deterministic rules             <1ms   fillers, stutters, dictionary
+   ↓  deterministic rules             <1ms   fillers, stutters, terms, addresses
    ↓  Qwen3-4B-Instruct              ~900ms  punctuation, grammar, false starts
    ↓  guardrails                            reject or accept the model's work
    ↓  clipboard + synthetic ⌘V
@@ -265,12 +265,62 @@ when the key goes down rather than when it comes up.
   "polish_enabled": true,
   "polish_model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
   "aggressive_fillers": false,
-  "dictionary": { "lex cloak": "Lex Cloak", "nice f": "NYSCEF" }
+  "dictionary": { "nice f": "NYSCEF" },
+  "protected_terms": ["Lex Cloak", "Monty Home"],
+  "fuzzy_threshold": 0.80,
+  "spoken_urls": true
 }
 ```
 
-- **`dictionary`**: proper nouns the ASR has never seen. Case-insensitive,
-  word-boundary matched. The place to add names, acronyms and jargon as you hit them.
+- **`dictionary`**: proper nouns the ASR has never seen, one exact spelling at a
+  time. Case-insensitive, word-boundary matched. The place for a mis-hearing you
+  have already seen and can name.
+- **`protected_terms`**: the same problem when you cannot name the mis-hearing.
+  An invented name comes back differently every time it is spoken, so listing
+  every variant is a losing race. Write the name once in the form you want and
+  anything close enough is snapped onto it. *Lexiclook*, *lex clock*, *lexi
+  cloak* and *legs cloak* all become **Lex Cloak**.
+
+  Safety here is a property of the term, not of the setting. A distinctive name
+  collides with almost nothing. A short one that looks like ordinary English
+  collides with a great deal, and no threshold repairs it. Measure before you
+  trust it:
+
+  ```
+  lippyctl terms --check "Lex Cloak"
+  ```
+
+  Against the 235,976 word system dictionary, `Lex Cloak` captures two real
+  words and `Paddle` captures sixteen. The second is a dictionary entry, not a
+  protected term.
+
+  A window is only scored when its length is within 25% of the term's, which is
+  what stops an ordinary short word being rewritten. *cloak* scores 0.75 against
+  *lexcloak* and never reaches the threshold, because it is rejected on length
+  first. Tightening the threshold could not have done this.
+  Cost scales with utterance length times the number of terms, because every
+  window is compared against every term. Measured with three terms: 0.27ms on a
+  60 character utterance, 0.66ms on a 180 character one, and 3.65ms on an
+  atypical 820 character block. The deterministic pass stays under a millisecond
+  for anything dictated in one breath.
+- **`fuzzy_threshold`**: how close is close enough, 0 to 1, default `0.80`.
+  Host names are matched 0.10 looser, because nothing inside an address is
+  ordinary English and the prose bar costs real corrections there.
+- **`spoken_urls`**: on by default. Joins a dictated address into a written one,
+  so *"lex cloak dot app"* arrives as `lexcloak.app` rather than as four words.
+  A protected term is absorbed into the host, which is what lets a two word name
+  become one label. Only a known suffix counts, and a closed class word before
+  the *dot* is refused, so *"the dot com bubble"* is left alone.
+
+  Addresses are also held out of every other rule. Before this, a `dictionary`
+  key matching a host rewrote it into the display form and turned a correctly
+  heard `lexcloak.com` into `Lex Cloak.com`, because a full stop satisfies a
+  word boundary.
+
+  **What this cannot fix:** when the speech model drops the dot entirely, as it
+  does with *"lexcloak.app"* about half the time, the words that survive are
+  *"Lex Cloak app"*, which is also an ordinary English phrase for the
+  application itself. Nothing downstream can tell those apart, so nothing tries.
 - **`aggressive_fillers`**: off by default. On, it also strips *like*, *you know*,
   *I mean*, *basically*, *actually*. These are content often enough that removing
   them is an edit, not a cleanup, which is why you have to ask for it.
@@ -280,7 +330,7 @@ when the key goes down rather than when it comes up.
   |---|---|---|
   | `raw` | 190ms | exactly what the speech model heard |
   | `fillers` | 210ms | drops um / uh / er |
-  | `clean` | 221ms | + stutters, false starts, punctuation, capitals, dictionary |
+  | `clean` | 221ms | + stutters, false starts, punctuation, capitals, dictionary, terms, addresses |
   | `polish` | 1057ms | + an LLM pass over the result |
 
   Only `polish` needs a language model. Everything below it is deterministic
@@ -309,11 +359,16 @@ make status                                # health + loaded models
 $VENV/bin/python daemon/lippyctl.py file x.wav        # full pipeline on a file
 $VENV/bin/python daemon/lippyctl.py file x.wav --raw  # rules only, no LLM
 $VENV/bin/python daemon/lippyctl.py last              # recent utterances
+$VENV/bin/python daemon/lippyctl.py terms             # audit protected terms
 ```
 
 `lippyctl file` prints raw ASR and final text separately, plus which guard fired
 if the polish pass fell back. That separation is usually enough to tell whether
 a bad result came from mishearing or from over-editing.
+
+`lippyctl terms` needs no daemon. It reports how many real words each protected
+term would rewrite, and says so plainly where the platform has no word list to
+check against rather than reporting a clean bill of health it cannot support.
 
 ## Releasing
 
