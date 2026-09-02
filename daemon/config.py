@@ -45,6 +45,21 @@ LOG_PATH = SUPPORT_DIR / "lippyd.log"
 DEFAULT_DICTIONARY: dict[str, str] = {}
 
 
+# Also empty by design, and the companion to the dictionary above. A dictionary
+# entry fixes one spelling you have already seen. A protected term is written
+# once in the form you want, and anything close enough to it is snapped onto
+# that form, which is what an invented name needs when it comes back differently
+# every time it is spoken:
+#
+#     "protected_terms": ["Ravenscroft", "Bellhaven Group"]
+#
+# How safe this is depends on the term. A distinctive name collides with almost
+# nothing. A short one that looks like ordinary English collides with a great
+# deal, and no threshold setting repairs that. Run `lippyctl terms` before
+# trusting an entry: it reports which real words the entry would rewrite.
+DEFAULT_PROTECTED_TERMS: list[str] = []
+
+
 # Cleanup is a dial, not a switch. Each step costs more than the last, and the
 # top one is the only step that needs a language model at all -- which is what
 # makes the lower steps viable on hardware where a 4B model is not.
@@ -94,7 +109,19 @@ class Config:
     aggressive_fillers: bool = False
     collapse_stutters: bool = True
     spoken_commands: bool = True
+
+    # Join a dictated address into a written one, so "example dot com" arrives
+    # as "example.com" rather than as three words.
+    spoken_urls: bool = True
+
     dictionary: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_DICTIONARY))
+    protected_terms: list[str] = field(
+        default_factory=lambda: list(DEFAULT_PROTECTED_TERMS))
+
+    # How close a span must be to a protected term before it is rewritten, from
+    # 0 to 1. Raising it accepts fewer mis-hearings, lowering it risks ordinary
+    # words. The default was chosen against a 235,976 word system dictionary.
+    fuzzy_threshold: float = 0.80
 
     # Utterances kept in memory so a failed paste is recoverable via
     # `lippyctl last`. Deliberately never written to disk: dictation is the most
@@ -163,14 +190,19 @@ class Config:
                 aggressive_fillers=self.aggressive_fillers,
                 collapse_stutters=False,
                 spoken_commands=False,
+                spoken_urls=False,
                 dictionary={},
+                protected_terms=[],
             )
         return RuleConfig(
             strip_fillers=self.strip_fillers,
             aggressive_fillers=self.aggressive_fillers,
             collapse_stutters=self.collapse_stutters,
             spoken_commands=self.spoken_commands,
+            spoken_urls=self.spoken_urls,
             dictionary=self.dictionary,
+            protected_terms=self.protected_terms,
+            fuzzy_threshold=self.fuzzy_threshold,
         )
 
 

@@ -14,6 +14,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+import terms as terms_mod
+
 # Non-lexical fillers only. These are never meaningful words in English, so
 # deleting them cannot change meaning. Deliberately NOT here: "like", "you
 # know", "I mean", "actually", "basically" -- all of them carry meaning often
@@ -52,7 +54,10 @@ class RuleConfig:
     aggressive_fillers: bool = False
     collapse_stutters: bool = True
     spoken_commands: bool = True
+    spoken_urls: bool = True
     dictionary: dict[str, str] = field(default_factory=dict)
+    protected_terms: list[str] = field(default_factory=list)
+    fuzzy_threshold: float = terms_mod.DEFAULT_THRESHOLD
 
 
 def _strip_fillers(text: str, cfg: RuleConfig) -> str:
@@ -114,7 +119,13 @@ def _apply_dictionary(text: str, dictionary: dict[str, str]) -> str:
 
     Keys are matched case-insensitively on word boundaries, longest first so
     "lex cloak app" beats "lex cloak".
+
+    Addresses are held out of the substitution. A key that matches a hostname
+    used to rewrite the host into its display form, turning a correctly heard
+    "lexcloak.com" into "Lex Cloak.com", because a full stop satisfies the word
+    boundary the pattern asks for. The name was right and the address was ruined.
     """
+    text, urls = terms_mod.protect_urls(text)
     for wrong in sorted(dictionary, key=len, reverse=True):
         right = dictionary[wrong]
         text = re.sub(
@@ -123,10 +134,14 @@ def _apply_dictionary(text: str, dictionary: dict[str, str]) -> str:
             text,
             flags=re.IGNORECASE,
         )
-    return text
+    return terms_mod.restore_urls(text, urls)
 
 
 def _tidy(text: str) -> str:
+    # Addresses are held out for the same reason as in the dictionary pass:
+    # sentence capitalisation would uppercase a host that begins an utterance,
+    # and the standalone "i" rule can reach inside one.
+    text, urls = terms_mod.protect_urls(text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r" *\n *", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
@@ -136,7 +151,7 @@ def _tidy(text: str) -> str:
     text = re.sub(r"\s+([,.;:!?])", r"\1", text)
     text = text.strip()
     text = _capitalise_sentences(text)
-    return text
+    return terms_mod.restore_urls(text, urls)
 
 
 def _capitalise_sentences(text: str) -> str:
@@ -161,6 +176,12 @@ def clean(text: str, cfg: RuleConfig | None = None) -> str:
         text = _collapse_stutters(text)
     if cfg.spoken_commands:
         text = _apply_spoken_commands(text)
+    # Terms run before the dictionary so that spoken addresses have already
+    # been joined into real ones, which is what lets the dictionary pass hold
+    # them out.
+    if cfg.protected_terms or cfg.spoken_urls:
+        text = terms_mod.apply(text, cfg.protected_terms, cfg.fuzzy_threshold,
+                               join_urls=cfg.spoken_urls)
     if cfg.dictionary:
         text = _apply_dictionary(text, cfg.dictionary)
     return _tidy(text)
