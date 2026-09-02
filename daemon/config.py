@@ -118,6 +118,19 @@ class Config:
     protected_terms: list[str] = field(
         default_factory=lambda: list(DEFAULT_PROTECTED_TERMS))
 
+    # Write dictated numbers as digits. Off by default because it is a policy
+    # rather than a correction, and a wrong one is a changed number.
+    #
+    # A run of number words is read three ways depending on what surrounds it.
+    # After a phrase in `digit_triggers`, or standing alone, or read out in
+    # pieces, it is an identifier and the digits run together: "ten fifty one"
+    # becomes 1051. With a preposition in front or a meridiem behind it is a
+    # clock reading: "at nine thirty" becomes 9:30. Otherwise it is a quantity,
+    # and only values above `number_word_max` become digits.
+    spoken_numbers: bool = False
+    number_word_max: int = 12
+    digit_triggers: list[str] = field(default_factory=list)
+
     # How close a span must be to a protected term before it is rewritten, from
     # 0 to 1. Raising it accepts fewer mis-hearings, lowering it risks ordinary
     # words. The default was chosen against a 235,976 word system dictionary.
@@ -193,6 +206,7 @@ class Config:
                 spoken_urls=False,
                 dictionary={},
                 protected_terms=[],
+                spoken_numbers=False,
             )
         return RuleConfig(
             strip_fillers=self.strip_fillers,
@@ -203,6 +217,9 @@ class Config:
             dictionary=self.dictionary,
             protected_terms=self.protected_terms,
             fuzzy_threshold=self.fuzzy_threshold,
+            spoken_numbers=self.spoken_numbers,
+            number_word_max=self.number_word_max,
+            digit_triggers=self.digit_triggers,
         )
 
 

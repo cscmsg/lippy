@@ -28,7 +28,7 @@ hold Right Option
    ↓  AVAudioEngine → 16 kHz mono Float32
    ↓  unix socket (newline-delimited JSON, base64 PCM)
    ↓  Parakeet TDT 0.6B v3          ~200ms   speech → text
-   ↓  deterministic rules             <1ms   fillers, stutters, terms, addresses
+   ↓  deterministic rules             <1ms   fillers, stutters, terms, addresses, numbers
    ↓  Qwen3-4B-Instruct              ~900ms  punctuation, grammar, false starts
    ↓  guardrails                            reject or accept the model's work
    ↓  clipboard + synthetic ⌘V
@@ -268,7 +268,10 @@ when the key goes down rather than when it comes up.
   "dictionary": { "nice f": "NYSCEF" },
   "protected_terms": ["Lex Cloak", "Monty Home"],
   "fuzzy_threshold": 0.80,
-  "spoken_urls": true
+  "spoken_urls": true,
+  "spoken_numbers": true,
+  "number_word_max": 12,
+  "digit_triggers": ["/session start", "/session end"]
 }
 ```
 
@@ -321,6 +324,41 @@ when the key goes down rather than when it comes up.
   does with *"lexcloak.app"* about half the time, the words that survive are
   *"Lex Cloak app"*, which is also an ordinary English phrase for the
   application itself. Nothing downstream can tell those apart, so nothing tries.
+- **`spoken_numbers`**: off by default, because this is a policy rather than a
+  correction and a wrongly written number still reads as a number. The speech
+  model already writes digits when the words around them make the purpose
+  obvious, but that inference is fragile. Changing one word of context was
+  enough to lose it:
+
+  ```
+  "session start ten fifty one"  ->  "Session start 1051"
+  "session end ten fifty one"    ->  "Session and ten fifty one"
+  ```
+
+  A run of number words is read three ways, decided entirely by what surrounds it.
+
+  | Reading | When | Result |
+  |---|---|---|
+  | identifier | after a `digit_triggers` phrase, alone in the utterance, or read out in pieces | `ten fifty one` becomes `1051` |
+  | clock | a preposition in front, or a meridiem behind | `at nine thirty` becomes `9:30` |
+  | quantity | everything else | `twenty three` becomes `23`, `three` stays `three` |
+
+  "Read out in pieces" is the part that makes this survive a misheard trigger.
+  `ten fifty one` is two numbers side by side, which is not how any English
+  sentence counts, so it is treated as an identifier wherever it appears.
+
+  A trigger outranks the clock, which is the ambiguity worth knowing about:
+  `ten fifteen` is both a valid time and a valid session number, so
+  `/session start ten fifteen` is `1015` while `meet at ten fifteen` is `10:15`.
+  With no cue either way a bare `ten fifteen` is `1015`, on the grounds that the
+  number said many times a day should not have to fight the clock for it.
+- **`number_word_max`**: the largest quantity still spelled out, default `12`.
+  Above it becomes digits. The carve-out usefully covers exactly the words that
+  are most dangerous to touch, since *one*, *two* and the rest of the small ones
+  appear constantly in prose meaning something other than a count.
+- **`digit_triggers`**: phrases after which a number is an identifier rather than
+  a quantity or a time. Runs after the dictionary, so a trigger the dictionary
+  just repaired still counts.
 - **`aggressive_fillers`**: off by default. On, it also strips *like*, *you know*,
   *I mean*, *basically*, *actually*. These are content often enough that removing
   them is an edit, not a cleanup, which is why you have to ask for it.
@@ -330,7 +368,7 @@ when the key goes down rather than when it comes up.
   |---|---|---|
   | `raw` | 190ms | exactly what the speech model heard |
   | `fillers` | 210ms | drops um / uh / er |
-  | `clean` | 221ms | + stutters, false starts, punctuation, capitals, dictionary, terms, addresses |
+  | `clean` | 221ms | + stutters, false starts, punctuation, capitals, dictionary, terms, addresses, numbers |
   | `polish` | 1057ms | + an LLM pass over the result |
 
   Only `polish` needs a language model. Everything below it is deterministic
