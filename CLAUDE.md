@@ -35,7 +35,7 @@ needs a parameter, not a copy.
 ## Working here
 
 ```
-make test          # 104 tests, offline, fast
+make test          # 350 tests, offline, fast
 make app           # build and sign the bundle
 make install       # replace the copy in ~/Applications
 make dmg           # distributable disk image
