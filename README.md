@@ -262,7 +262,7 @@ when the key goes down rather than when it comes up.
 ```json
 {
   "asr_backend": "parakeet",
-  "polish_enabled": true,
+  "cleanup_level": "polish",
   "polish_model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
   "aggressive_fillers": false,
   "dictionary": { "nice f": "NYSCEF" },
