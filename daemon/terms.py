@@ -103,6 +103,12 @@ _SPOKEN_URL_RE = re.compile(r"(?i)\b([A-Za-z0-9-]+)((?:\s+dot\s+[A-Za-z0-9-]+)+)
 
 _WORD_RE = re.compile(r"[A-Za-z0-9'’-]+")
 
+# A possessive belongs to the sentence, not to the name. The token pattern takes
+# the apostrophe in, so without this a window ending in "'s" was replaced whole
+# and the suffix vanished: "Gulati's office" became "Gulhati office". It is split
+# off before scoring and put back on the replacement.
+_POSSESSIVE_RE = re.compile(r"(['’]s|['’])$", re.IGNORECASE)
+
 # An address spoken as "<name> at <host>" only becomes an address when the
 # utterance says it is one. "look at example.com" and "the docs are at
 # example.com" are ordinary prose, and a rule keying on "at" plus a host would
@@ -155,9 +161,17 @@ def prepare(terms: list[str]) -> list[Term]:
     return out
 
 
+def split_possessive(candidate: str) -> tuple[str, str]:
+    """Separate a trailing possessive from the name it is attached to."""
+    match = _POSSESSIVE_RE.search(candidate)
+    if not match:
+        return candidate, ""
+    return candidate[:match.start()], match.group(0)
+
+
 def score(candidate: str, term: Term) -> float:
     """Similarity, or zero if the length guard rejects the candidate first."""
-    a = normalise(candidate)
+    a = normalise(split_possessive(candidate)[0])
     if not a or not term.key:
         return 0.0
     if abs(1 - len(a) / len(term.key)) > LENGTH_TOLERANCE:
@@ -391,8 +405,9 @@ def _replace_in_prose(text: str, terms: list[Term], threshold: float) -> str:
 
         if best_term is not None:
             start = tokens[index].start()
+            span = text[start:tokens[best_end].end()]
             out.append(text[last:start])
-            out.append(best_term.display)
+            out.append(best_term.display + split_possessive(span)[1])
             last = tokens[best_end].end()
             index = best_end + 1
         else:

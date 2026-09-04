@@ -146,8 +146,11 @@ def _apply_dictionary(text: str, dictionary: dict[str, str]) -> tuple[str, list[
     # branches by length is what makes the longer key win.
     ordered = sorted(dictionary, key=len, reverse=True)
     lookup = {key.lower(): dictionary[key] for key in ordered}
+    # The trailing group lets a key match through a possessive and hand it back,
+    # so "Soina's" reaches "Soyna's" without a second entry for every name.
     pattern = re.compile(
-        r"(?<![\w'])(" + "|".join(re.escape(key) for key in ordered) + r")(?![\w'])",
+        r"(?<![\w'])(" + "|".join(re.escape(key) for key in ordered)
+        + r")([’']s|[’'])?(?![\w'])",
         re.IGNORECASE,
     )
 
@@ -156,7 +159,7 @@ def _apply_dictionary(text: str, dictionary: dict[str, str]) -> tuple[str, list[
     def substitute(match: re.Match[str]) -> str:
         value = lookup[match.group(1).lower()]
         used.append(value)
-        return value
+        return value + (match.group(2) or "")
 
     text = pattern.sub(substitute, text)
     return terms_mod.restore_urls(text, urls), used

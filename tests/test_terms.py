@@ -311,3 +311,41 @@ def test_runs_through_the_full_clean_pass():
     cfg = RuleConfig(spoken_emails=True)
     assert clean("send it to alice at example dot com", cfg) == \
         "Send it to alice@example.com"
+
+
+# --------------------------------------------------------------------------
+# A possessive belongs to the sentence, not to the name.
+# --------------------------------------------------------------------------
+
+def test_a_fuzzy_match_keeps_the_possessive():
+    # The token pattern takes the apostrophe in, so the whole token used to be
+    # replaced by the bare display form and the suffix vanished.
+    assert terms.apply("Gulati's office", ["Gulhati"]) == "Gulhati's office"
+
+
+def test_a_multi_word_term_keeps_the_possessive():
+    assert terms.apply("the lex clock's update", ["Lex Cloak"]) == \
+        "the Lex Cloak's update"
+
+
+def test_a_dictionary_key_matches_through_a_possessive():
+    cfg = RuleConfig(dictionary={"Soina": "Soyna"})
+    assert clean("Soina's report is ready", cfg) == "Soyna's report is ready"
+    assert clean("Soina called", cfg) == "Soyna called"
+
+
+def test_a_bare_trailing_apostrophe_is_kept():
+    cfg = RuleConfig(dictionary={"Joneses": "Smiths"})
+    assert clean("the Joneses' house", cfg) == "The Smiths' house"
+
+
+@pytest.mark.parametrize("text", ["don't do that", "it's fine", "we're late"])
+def test_an_ordinary_contraction_is_untouched(text):
+    cfg = RuleConfig(dictionary={"Soina": "Soyna"}, protected_terms=["Gulhati"])
+    assert clean(text, cfg) == text[0].upper() + text[1:]
+
+
+def test_the_possessive_is_not_scored_as_part_of_the_name():
+    # "gulatis" must be measured as "gulati", or the length guard shifts.
+    term = terms.prepare(["Gulhati"])[0]
+    assert terms.score("Gulati's", term) == pytest.approx(terms.score("Gulati", term))
