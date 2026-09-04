@@ -117,8 +117,7 @@ def _apply_spoken_commands(text: str) -> str:
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
     return text
 
-
-def _apply_dictionary(text: str, dictionary: dict[str, str]) -> str:
+def _apply_dictionary(text: str, dictionary: dict[str, str]) -> tuple[str, list[str]]:
     """Fix proper nouns the ASR model has never seen.
 
     Keys are matched case-insensitively on word boundaries, longest first so
@@ -128,17 +127,65 @@ def _apply_dictionary(text: str, dictionary: dict[str, str]) -> str:
     used to rewrite the host into its display form, turning a correctly heard
     "lexcloak.com" into "Lex Cloak.com", because a full stop satisfies the word
     boundary the pattern asks for. The name was right and the address was ruined.
+
+    Also returns the replacement values that actually fired, so the tidy pass
+    can put their authored case back. See `_restore_authored_case`.
     """
     text, urls = terms_mod.protect_urls(text)
+    used: list[str] = []
     for wrong in sorted(dictionary, key=len, reverse=True):
         right = dictionary[wrong]
-        text = re.sub(
+        text, count = re.subn(
             r"(?<![\w'])" + re.escape(wrong) + r"(?![\w'])",
             right.replace("\\", "\\\\"),
             text,
             flags=re.IGNORECASE,
         )
-    return terms_mod.restore_urls(text, urls)
+        if count:
+            used.append(right)
+    return terms_mod.restore_urls(text, urls), used
+
+
+def _restore_authored_case(text: str, values: list[str]) -> str:
+    """Put back the case a replacement was written with.
+
+    A replacement is authored text, not prose. If it was written lowercase the
+    author meant it lowercase, and sentence capitalisation has no business
+    overruling that. This started mattering the moment replacements began
+    carrying commands and usernames: `session end` came back as `Session end`,
+    which matches no skill, and `sgulhati` came back as `Sgulhati`.
+
+    Runs after the tidy pass rather than holding the spans out of it, because
+    the number pass in between rewrites the text and a span recorded earlier
+    would no longer point at the same characters.
+    """
+    for value in values:
+        if not value:
+            continue
+        text = re.sub(
+            r"(?<![\w'])" + re.escape(value) + r"(?![\w'])",
+            lambda match, replacement=value: replacement,
+            text,
+            flags=re.IGNORECASE,
+        )
+    return text
+
+
+def _strip_command_period(text: str) -> str:
+    """A slash command is a line, not a sentence, so it takes no full stop.
+
+    Parakeet adds one to a short utterance about half the time, and on
+    "start session ten fifty" it was 6 voices out of 6. The stop lands inside
+    the argument, so `/session start 1050.` hands the skill "1050." to parse.
+
+    Only fires on a single command line. Anything carrying a sentence break is
+    prose that happens to begin with a slash, and keeps its punctuation.
+    """
+    stripped = text.rstrip()
+    if (stripped.startswith("/") and stripped.endswith(".")
+            and not stripped.endswith("..") and ". " not in stripped):
+        return stripped[:-1]
+    return text
 
 
 def _tidy(text: str) -> str:
@@ -186,12 +233,16 @@ def clean(text: str, cfg: RuleConfig | None = None) -> str:
     if cfg.protected_terms or cfg.spoken_urls:
         text = terms_mod.apply(text, cfg.protected_terms, cfg.fuzzy_threshold,
                                join_urls=cfg.spoken_urls)
+    used: list[str] = []
     if cfg.dictionary:
-        text = _apply_dictionary(text, cfg.dictionary)
+        text, used = _apply_dictionary(text, cfg.dictionary)
     # Numbers run last of the substituting passes, because a trigger phrase is
     # often something the dictionary just finished repairing.
     if cfg.spoken_numbers:
         text = digits_mod.convert(text, digits_mod.NumberConfig(
             enabled=True, word_max=cfg.number_word_max,
             triggers=cfg.digit_triggers))
-    return _tidy(text)
+    text = _tidy(text)
+    if used:
+        text = _restore_authored_case(text, used)
+    return _strip_command_period(text)

@@ -150,3 +150,51 @@ def test_config_ignores_an_unknown_key_rather_than_failing():
         path = pathlib.Path(tmp) / "config.json"
         path.write_text(json.dumps({"strip_fillers": False, "nonsense_key": 1}))
         assert Config.load(path).strip_fillers is False
+
+
+# --------------------------------------------------------------------------
+# Replacements are authored text, so prose conventions do not get to edit them.
+# --------------------------------------------------------------------------
+
+def test_a_lowercase_replacement_stays_lowercase_at_the_start():
+    # Sentence capitalisation used to turn this into "Session end", which
+    # matches no skill. The slash form escaped only because "/" is not a letter.
+    cfg = RuleConfig(dictionary={"session end": "session end"})
+    assert clean("Session end.", cfg) == "session end."
+
+
+def test_a_lowercase_username_replacement_keeps_its_case():
+    cfg = RuleConfig(dictionary={"S. Golati": "sgulhati"})
+    assert clean("S. Golati", cfg) == "sgulhati"
+    assert clean("email S. Golati today", cfg) == "Email sgulhati today"
+
+
+def test_an_authored_capital_is_still_honoured():
+    cfg = RuleConfig(dictionary={"nice f": "NYSCEF"})
+    assert clean("nice f filing today", cfg) == "NYSCEF filing today"
+
+
+def test_case_restoration_does_not_reach_into_a_longer_word():
+    cfg = RuleConfig(dictionary={"session end": "session end"})
+    assert clean("the session ending was abrupt", cfg) == "The session ending was abrupt"
+
+
+def test_a_command_line_takes_no_full_stop():
+    cfg = RuleConfig(dictionary={"start session": "/session start"})
+    assert clean("Start session.", cfg) == "/session start"
+
+
+def test_a_command_line_keeps_its_argument_intact():
+    cfg = RuleConfig(dictionary={"start session": "/session start"},
+                     spoken_numbers=True)
+    assert clean("Start session ten fifty.", cfg) == "/session start 1050"
+
+
+def test_prose_that_merely_begins_with_a_slash_keeps_its_punctuation():
+    cfg = RuleConfig(dictionary={"start session": "/session start"})
+    out = clean("Start session. Then check the logs.", cfg)
+    assert out.endswith("logs.")
+
+
+def test_an_ordinary_sentence_still_gets_its_full_stop_left_alone():
+    assert clean("this is a sentence.") == "This is a sentence."

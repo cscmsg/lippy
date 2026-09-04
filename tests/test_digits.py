@@ -154,7 +154,9 @@ def test_a_clock_needs_a_real_hour_and_minute():
 def test_runs_after_the_dictionary_so_a_repaired_trigger_counts():
     cfg = RuleConfig(dictionary={"Session and": "/session end"},
                      spoken_numbers=True, digit_triggers=["/session end"])
-    assert clean("Session and ten fifty one.", cfg) == "/session end 1051."
+    # The trailing stop is gone because the line is a command, not a sentence.
+    # See test_a_command_line_takes_no_full_stop.
+    assert clean("Session and ten fifty one.", cfg) == "/session end 1051"
 
 
 def test_survives_filler_removal():
