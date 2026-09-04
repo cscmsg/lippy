@@ -13,5 +13,5 @@ has outlived its purpose and belongs in the README instead.
 
 | Plan | Status |
 |---|---|
-| [Windows, Part 1: the client](windows-client.md) | capture, paste and the tray. Phases 1 and 3 shipped, the pure layer shipped, and the hook is written but has never run |
+| [Windows, Part 1: the client](windows-client.md) | capture, paste and the tray. Phases 1 and 3 shipped, the pure layer shipped, and the hook has now run on a real keyboard |
 | [Windows, Part 2: packaging and distribution](windows-packaging.md) | not started, waiting on Part 1 phase 2 |

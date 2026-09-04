@@ -38,13 +38,30 @@ last item this plan carried against shipping a build. Note for anyone reading
 the old wording: it arrives through `onnxruntime-genai`, not `sherpa-onnx`,
 whose wheel carries its own runtime.
 
-The hook adapter is written, in cscmsg/lippy#7, and is the one thing in this
-list that has landed **without having run**. `daemon/windows_hook.py` holds the
-hook thread, the queue-push callback, the watchdog and the drain loop, and
-`config.py` now carries `hotkey` and `latch_key` as names resolved through
-`hotkey_state.KEYS`. Everything in it that decides anything is tested. Nothing
-in it that talks to Win32 has executed, which is what step 2b-verify below is
-for. Do not build 2c on top of it before that has been done.
+The hook adapter is written, in cscmsg/lippy#7, and **it has now run**, on a
+real Windows laptop on 2026-08-28. `daemon/windows_hook.py` holds the hook
+thread, the queue-push callback, the watchdog and the drain loop, and
+`config.py` carries `hotkey` and `latch_key` as names resolved through
+`hotkey_state.KEYS`.
+
+What the run established, so that 2c can be built on it:
+
+- The hook installs and stays installed. Right Control produced `begin_hold`
+  and `end`, the 0.30s guard rejected a 0.14s tap, and a struck key aborted a
+  hold.
+- Nothing is swallowed. A sentence typed into Notepad with the diagnostic
+  running arrived in full, and Control plus C reached the console underneath.
+- The watchdog reinstalled once after 30s of silence and then stayed quiet.
+- `ALTGR_LCONTROL_SCAN` is **correct**, which trap 3 now records with the
+  measurement rather than the doubt.
+
+It also turned up one defect the tests could not have caught, because three of
+them shared the mistake. Key repeat was being read as a second press, so a
+latched session ended and restarted at the repeat rate for as long as the key
+stayed down. Fixed in `hotkey_state.py`, along with the missing-release wedge
+that the fix would otherwise have introduced. **The latch path is the one thing
+the run did not re-exercise afterwards**, so the first minute of the next
+session at a Windows keyboard belongs to it.
 
 ## Goal
 
@@ -164,11 +181,25 @@ only mitigation available. It belongs in the adapter rather than the state
 machine, and it should be commented as undocumented behaviour so that a future
 reader knows it can lapse without warning.
 
-That check now exists, as `ALTGR_LCONTROL_SCAN` in `daemon/windows_hook.py`, and
-it is the weakest line in this whole plan. The Keyman code the `0x21D` came from
-was reading the `lParam` encoding of an ordinary key message, and a hook receives
-a `scanCode` field and an extended flag instead. Those are not obliged to agree,
-and nobody has looked. Step 2b-verify is the measurement.
+That check exists as `ALTGR_LCONTROL_SCAN` in `daemon/windows_hook.py`, and it
+was the weakest line in this whole plan until 2026-08-28, when it was measured
+on a real keyboard with a United Kingdom layout added. **The number is right.**
+Holding AltGr produces, repeatedly:
+
+```
+raw message=0x0104 vk=0xA2 scan=0x21D flags=0x20 extra=0x0
+raw message=0x0104 vk=0xA5 scan=0x38 flags=0x21 extra=0x0  extended
+```
+
+So Windows does put `0x200` into the hook's `scanCode` field for the synthetic
+Left Control, even though the field and the `lParam` encoding had no obligation
+to agree. Note that the synthetic event is **not** flagged extended and carries
+`LLKHF_ALTDOWN` instead, which distinguishes it from both a real Left Control
+(`scan=0x1D flags=0x00`) and a real Right Control (`scan=0x1D flags=0x01`).
+
+The behaviour is still undocumented and can still lapse, so leave the comment
+saying so. What has changed is that the number is now observed rather than
+borrowed.
 
 ### 4. `SendInput` has no private modifier state
 
@@ -253,31 +284,12 @@ to it.
 Everything from here runs only on the laptop. None of it can be covered on a
 runner, so each step below says what it owes the reader instead.
 
-**2b-verify. Run the hook on a real keyboard.** The code landed in
-cscmsg/lippy#7 and has never executed. Nothing below it should be built on top
-of an adapter nobody has watched work, so this is the next thing to do and it
-takes a laptop, not a session.
-
-```
-python daemon/windows_hook.py --raw
-```
-
-Four things to find out, in the order they will bite:
-
-1. **Does the hotkey register at all.** Hold Right Control and look for
-   `begin_hold` then `end`. If nothing appears, the hook did not install and the
-   thread will have logged why.
-2. **What AltGr actually sends.** Press it and read the raw line.
-   `ALTGR_LCONTROL_SCAN` is set to `0x21D` from a Keyman pull request that was
-   reading a different encoding, and this is the measurement that either
-   confirms it or replaces it. Note the `scan` and `extended` fields for both
-   the Left Control and the Right Alt that arrive together.
-3. **Whether the watchdog is quiet when it should be.** Leave it running for a
-   few minutes without typing. Expect one INFO line about reinstalling and then
-   nothing, not a line every thirty seconds.
-4. **Whether anything is swallowed.** Type normally with the diagnostic running.
-   Every key must still reach the application underneath, because the callback
-   returns `CallNextHookEx` and is not supposed to consume anything.
+**2b-verify is done**, on 2026-08-28. What it found is above. One thing it did
+not cover, because the latch was only exercised before the repeat fix and not
+after: **hold Right Control, add Right Shift to latch, release both, then press
+Right Control once to end it.** Expect `begin_latched`, then `promote` if you
+came in from a hold, then a single `end`. Anything that ends and restarts while
+a key is down means the guard has regressed. Do that first, then carry on.
 
 **2c. Capture.** `sounddevice` at the device's native rate, converted once on
 stop through the ported resampler, with the non-zero frame assertion.
@@ -349,6 +361,11 @@ Delivered already: the state machine as a platform-neutral, fully tested module.
 - Package versions and release dates: PyPI JSON API, 2026-08-26. `sounddevice`
   0.5.6, `comtypes` 1.4.16, `pywin32` 312, `uiautomation` 2.0.29, `pystray`
   0.19.5, `keyboard` 0.13.5.
+- AltGr's synthetic Left Control arriving with `scanCode` `0x21D`, not extended,
+  and carrying `LLKHF_ALTDOWN`: measured directly with
+  `python daemon/windows_hook.py --raw` on Windows with a United Kingdom layout
+  added, 2026-08-28. This supersedes the doubt the plan carried about the
+  Keyman reading, and confirms it.
 - `onnxruntime` 1.29.0 is the current release, published 2026-08-17, with cp312
   wheels for `win_amd64` and `macosx_14_0_arm64`: PyPI JSON API, 2026-08-27. That
   it reaches the tree through `onnxruntime-genai` rather than `sherpa-onnx` was

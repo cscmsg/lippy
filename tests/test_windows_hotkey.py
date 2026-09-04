@@ -173,6 +173,10 @@ def test_primary_first_then_latch_promotes_the_recording_in_progress():
     assert machine.handle(down(VK_RCONTROL, at=1.0)) == (Action.BEGIN_HOLD,)
     assert machine.handle(down(VK_RSHIFT, at=1.4)) == (Action.PROMOTE,)
     assert machine.state is State.LATCHED
+    # Letting go is what makes the next press a press. This is the ordinary
+    # way to reach a latched session, so the release is not a detail: the user
+    # is still holding the key at the moment of promotion.
+    assert machine.handle(up(VK_RCONTROL, at=1.42)) == ()
     # And the hold guard no longer applies, however briefly it ran.
     assert machine.handle(down(VK_RCONTROL, at=1.45)) == (Action.END,)
 
@@ -217,6 +221,7 @@ def test_a_latched_session_that_ended_does_not_restart_on_the_key_coming_up():
     machine = HotkeyState()
     machine.handle(down(VK_RSHIFT, at=1.0))
     machine.handle(down(VK_RCONTROL, at=1.1))
+    machine.handle(up(VK_RCONTROL, at=1.2))
     machine.handle(down(VK_RCONTROL, at=9.0))
     assert machine.handle(up(VK_RCONTROL, at=9.1)) == ()
     assert machine.state is State.IDLE
@@ -228,8 +233,120 @@ def test_the_latch_state_survives_a_session_and_starts_the_next_one_latched():
     machine = HotkeyState()
     machine.handle(down(VK_RSHIFT, at=1.0))
     machine.handle(down(VK_RCONTROL, at=1.1))
+    machine.handle(up(VK_RCONTROL, at=1.2))
     machine.handle(down(VK_RCONTROL, at=4.0))
+    machine.handle(up(VK_RCONTROL, at=4.1))
     assert machine.handle(down(VK_RCONTROL, at=6.0)) == (Action.BEGIN_LATCHED,)
+
+
+# ---- key repeat, which a real keyboard sends and the tests above did not --
+#
+# Every case here comes from one diagnostic run on a real Windows keyboard.
+# The machine used to take each repeat for a fresh press, and the tests missed
+# it because they fed it one down per intended press, which is what the machine
+# believed rather than what a keyboard emits.
+
+
+def test_key_repeat_while_latched_does_not_end_the_session():
+    """The regression. Windows repeats the primary key while it stays down,
+    and a latched session used to end and restart on every one of them."""
+    machine = HotkeyState()
+    machine.handle(down(VK_RSHIFT, at=1.0))
+    assert machine.handle(down(VK_RCONTROL, at=1.1)) == (Action.BEGIN_LATCHED,)
+    for repeat in range(9):
+        assert machine.handle(down(VK_RCONTROL, at=1.14 + repeat * 0.03)) == ()
+    assert machine.state is State.LATCHED
+    assert machine.recording is True
+
+
+def test_a_repeat_stream_while_latched_emits_no_actions_at_all():
+    """Counted rather than spot checked, because the failure was a stream of
+    paired actions and one of them alone would look like a passing case."""
+    machine = HotkeyState()
+    machine.handle(down(VK_RSHIFT, at=1.0))
+    machine.handle(down(VK_RCONTROL, at=1.1))
+    emitted = []
+    for repeat in range(40):
+        emitted.extend(machine.handle(down(VK_RCONTROL, at=1.2 + repeat * 0.03)))
+    assert emitted == []
+
+
+def test_the_primary_key_must_come_up_before_it_can_end_a_latched_session():
+    machine = HotkeyState()
+    machine.handle(down(VK_RSHIFT, at=1.0))
+    machine.handle(down(VK_RCONTROL, at=1.1))
+    assert machine.handle(down(VK_RCONTROL, at=1.2)) == ()
+    assert machine.handle(up(VK_RCONTROL, at=1.3)) == ()
+    assert machine.state is State.LATCHED
+    assert machine.handle(down(VK_RCONTROL, at=2.0)) == (Action.END,)
+    assert machine.state is State.IDLE
+
+
+def test_repeat_after_an_abort_does_not_start_a_new_hold():
+    """The same root cause in the other direction. A chord aborts the hold and
+    leaves the key still physically down, so the repeats that follow used to
+    begin a fresh capture the user never asked for."""
+    machine = HotkeyState()
+    assert machine.handle(down(VK_RCONTROL, at=1.0)) == (Action.BEGIN_HOLD,)
+    assert machine.handle(down(C_KEY, at=1.1)) == (Action.ABORT,)
+    for repeat in range(5):
+        assert machine.handle(down(VK_RCONTROL, at=1.2 + repeat * 0.03)) == ()
+    assert machine.state is State.IDLE
+    assert machine.recording is False
+
+
+def test_the_key_coming_up_after_an_abort_clears_the_way_for_the_next_hold():
+    machine = HotkeyState()
+    machine.handle(down(VK_RCONTROL, at=1.0))
+    machine.handle(down(C_KEY, at=1.1))
+    machine.handle(down(VK_RCONTROL, at=1.2))
+    assert machine.handle(up(VK_RCONTROL, at=1.5)) == ()
+    assert machine.handle(down(VK_RCONTROL, at=2.0)) == (Action.BEGIN_HOLD,)
+
+
+def test_repeat_does_not_move_the_start_of_a_latched_session():
+    """The cap runs from the promotion, so a repeat that reset it would keep a
+    forgotten session alive indefinitely."""
+    machine = HotkeyState(latch_cap=10.0)
+    machine.handle(down(VK_RSHIFT, at=0.0))
+    machine.handle(down(VK_RCONTROL, at=1.0))
+    for repeat in range(20):
+        machine.handle(down(VK_RCONTROL, at=1.1 + repeat * 0.03))
+    assert machine.tick(10.9) == ()
+    assert machine.tick(11.0) == (Action.END,)
+
+
+def test_a_release_that_went_missing_wedges_the_hotkey_until_reset():
+    """States the cost of the guard outright. A key recorded as down that never
+    comes up silences the hotkey, which is why the adapter resets the machine
+    whenever it reinstalls the hook."""
+    machine = HotkeyState()
+    machine.handle(down(VK_RCONTROL, at=1.0))
+    # The release is never delivered, which is what a hook gap looks like.
+    assert machine.handle(down(VK_RCONTROL, at=5.0)) == ()
+    assert machine.handle(down(VK_RCONTROL, at=9.0)) == ()
+    machine.reset()
+    assert machine.handle(down(VK_RCONTROL, at=10.0)) == (Action.BEGIN_HOLD,)
+
+
+def test_reset_clears_the_primary_key_as_well_as_the_session():
+    machine = HotkeyState()
+    machine.handle(down(VK_RCONTROL, at=1.0))
+    machine.reset()
+    assert machine.state is State.IDLE
+    # A press straight after the reset is a first press, not a repeat.
+    assert machine.handle(down(VK_RCONTROL, at=2.0)) == (Action.BEGIN_HOLD,)
+    assert machine.handle(up(VK_RCONTROL, at=3.0)) == (Action.END,)
+
+
+def test_repeat_of_a_key_that_is_not_the_primary_still_aborts_only_once():
+    """Held struck keys repeat too. The first one abandons the hold and the
+    rest have nothing left to abandon."""
+    machine = HotkeyState()
+    machine.handle(down(VK_RCONTROL, at=1.0))
+    assert machine.handle(down(A_KEY, at=1.1)) == (Action.ABORT,)
+    for repeat in range(5):
+        assert machine.handle(down(A_KEY, at=1.2 + repeat * 0.03)) == ()
 
 
 def test_binding_the_latch_to_the_primary_key_disables_latching(caplog):

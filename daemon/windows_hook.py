@@ -226,6 +226,7 @@ class Dispatcher:
         on_action,
         clock=time.monotonic,
         on_raw=None,
+        installs=None,
     ) -> None:
         self.machine = machine
         self.events = events
@@ -234,6 +235,13 @@ class Dispatcher:
         # `--diagnose --raw` uses this to print records that translate throws
         # away, which is the only way to see what AltGr actually sends.
         self.on_raw = on_raw
+        # Reads the hook's install count. A reinstall means events went missing
+        # for as long as the hook was gone, and the missing ones may include a
+        # key coming up, which the machine would otherwise still believe is
+        # held. It is a callable rather than the hook itself so that the drain
+        # loop keeps knowing nothing about Win32.
+        self.installs = installs
+        self._installs_seen = None if installs is None else installs()
 
     def pump(self, timeout: float = 0.1) -> int:
         """Wait briefly for one record, drain any others already waiting, tick.
@@ -242,6 +250,7 @@ class Dispatcher:
         counts and what a test can assert on.
         """
         emitted = 0
+        self._note_reinstalls()
         try:
             raw = self.events.get(timeout=timeout)
         except queue.Empty:
@@ -260,6 +269,28 @@ class Dispatcher:
             self.on_action(action)
             emitted += 1
         return emitted
+
+    def _note_reinstalls(self) -> None:
+        """Clear the machine when the hook has been reinstalled under it.
+
+        Checked at the top of the drain rather than from the hook thread, so
+        that the reset happens on the thread that owns the machine and cannot
+        land part way through a drain.
+
+        Dropping a session in progress is the intended cost. A reinstall means
+        an unknown stretch of events is missing, and a capture that continues
+        across that gap is recording on the strength of a key state nobody can
+        vouch for.
+        """
+        if self.installs is None:
+            return
+        current = self.installs()
+        if current == self._installs_seen:
+            return
+        self._installs_seen = current
+        if self.machine.recording:
+            log.info("hook was reinstalled during a capture, dropping it")
+        self.machine.reset()
 
     def _handle(self, raw) -> int:
         if self.on_raw is not None:
@@ -550,7 +581,8 @@ def main() -> int:
 
     hook = KeyboardHook(events)
     dispatcher = Dispatcher(machine, events, show,
-                            on_raw=describe if args.raw else None)
+                            on_raw=describe if args.raw else None,
+                            installs=lambda: hook.installs)
     hook.start()
     print(f"listening. hold {cfg.hotkey} to dictate, "
           f"{cfg.latch_key or 'nothing'} latches. Control plus C to stop.")
