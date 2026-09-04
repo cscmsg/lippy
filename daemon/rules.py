@@ -116,33 +116,48 @@ def _apply_spoken_commands(text: str) -> str:
     for pattern, replacement in SPOKEN_COMMANDS:
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
     return text
-
 def _apply_dictionary(text: str, dictionary: dict[str, str]) -> tuple[str, list[str]]:
     """Fix proper nouns the ASR model has never seen.
 
     Keys are matched case-insensitively on word boundaries, longest first so
     "lex cloak app" beats "lex cloak".
 
+    Every key is tried in ONE pass, which is what stops a replacement being
+    re-matched by a later key. Substituting in a loop cascaded: with both
+    "Sessions start" and "Session start" mapped to "/session start", the first
+    produced "/session start" and the second then matched inside that output
+    and produced "//session start". A leading slash is not a word character,
+    so the boundary the pattern asks for was satisfied.
+
     Addresses are held out of the substitution. A key that matches a hostname
     used to rewrite the host into its display form, turning a correctly heard
-    "lexcloak.com" into "Lex Cloak.com", because a full stop satisfies the word
-    boundary the pattern asks for. The name was right and the address was ruined.
+    "lexcloak.com" into "Lex Cloak.com", for the same reason: a full stop also
+    satisfies that boundary. The name was right and the address was ruined.
 
     Also returns the replacement values that actually fired, so the tidy pass
     can put their authored case back. See `_restore_authored_case`.
     """
     text, urls = terms_mod.protect_urls(text)
+    if not dictionary:
+        return terms_mod.restore_urls(text, urls), []
+
+    # Longest first: regex alternation is leftmost-first, so ordering the
+    # branches by length is what makes the longer key win.
+    ordered = sorted(dictionary, key=len, reverse=True)
+    lookup = {key.lower(): dictionary[key] for key in ordered}
+    pattern = re.compile(
+        r"(?<![\w'])(" + "|".join(re.escape(key) for key in ordered) + r")(?![\w'])",
+        re.IGNORECASE,
+    )
+
     used: list[str] = []
-    for wrong in sorted(dictionary, key=len, reverse=True):
-        right = dictionary[wrong]
-        text, count = re.subn(
-            r"(?<![\w'])" + re.escape(wrong) + r"(?![\w'])",
-            right.replace("\\", "\\\\"),
-            text,
-            flags=re.IGNORECASE,
-        )
-        if count:
-            used.append(right)
+
+    def substitute(match: re.Match[str]) -> str:
+        value = lookup[match.group(1).lower()]
+        used.append(value)
+        return value
+
+    text = pattern.sub(substitute, text)
     return terms_mod.restore_urls(text, urls), used
 
 

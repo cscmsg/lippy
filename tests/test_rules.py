@@ -198,3 +198,26 @@ def test_prose_that_merely_begins_with_a_slash_keeps_its_punctuation():
 
 def test_an_ordinary_sentence_still_gets_its_full_stop_left_alone():
     assert clean("this is a sentence.") == "This is a sentence."
+
+
+def test_a_replacement_is_not_re_matched_by_a_later_key():
+    # Two keys mapping to the same value used to cascade: the longer key
+    # produced "/session start", and the shorter one then matched inside that
+    # output, because a leading slash satisfies the word boundary.
+    cfg = RuleConfig(dictionary={"Sessions start": "/session start",
+                                 "Session start": "/session start"})
+    assert clean("Sessions start", cfg) == "/session start"
+    assert clean("Session start", cfg) == "/session start"
+
+
+def test_a_replacement_containing_a_key_is_left_alone():
+    cfg = RuleConfig(dictionary={"kick off": "session start", "start": "BEGIN"})
+    # "session start" contains "start", which a second pass would have eaten.
+    assert clean("kick off now", cfg) == "session start now"
+
+
+def test_the_longest_key_still_wins():
+    cfg = RuleConfig(dictionary={"lex cloak": "Lex Cloak",
+                                 "lex cloak app": "the Lex Cloak app"})
+    assert clean("open lex cloak app now", cfg) == "Open the Lex Cloak app now"
+    assert clean("open lex cloak now", cfg) == "Open Lex Cloak now"
