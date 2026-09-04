@@ -103,6 +103,28 @@ _SPOKEN_URL_RE = re.compile(r"(?i)\b([A-Za-z0-9-]+)((?:\s+dot\s+[A-Za-z0-9-]+)+)
 
 _WORD_RE = re.compile(r"[A-Za-z0-9'’-]+")
 
+# An address spoken as "<name> at <host>" only becomes an address when the
+# utterance says it is one. "look at example.com" and "the docs are at
+# example.com" are ordinary prose, and a rule keying on "at" plus a host would
+# rewrite both into something that reads as a valid address and is not. A
+# plausible wrong address is worse than visibly unfinished text, so the cue is
+# required rather than inferred.
+EMAIL_CUES = frozenset("""
+email emails e-mail mail mailed mailing cc bcc send sends sent sending
+write writes wrote writing reach contact contacted forward forwarded
+message messaged invite invited copy copied reply replied
+""".split())
+
+# Tokens that cannot be the local part of an address, so "sent it to him at
+# example.com" does not become "him@example.com".
+NOT_LOCAL = frozenset("""
+i me my he him his she her it its we us our they them their you your
+the a an this that these those there here is are was were be been being
+and or but of to in on at for with from as if so no not now then
+""".split())
+
+_SPOKEN_EMAIL_RE = re.compile(r"(?i)(?<![\w'])([A-Za-z0-9][A-Za-z0-9._-]*)\s+at\s+(?=\S)")
+
 # A window may only span whitespace and hyphens. Anything else, a comma or a
 # full stop, means the words belong to different thoughts and joining them
 # would cross a boundary the speaker put there.
@@ -246,6 +268,52 @@ def join_spoken_urls(text: str, terms: list[Term], threshold: float) -> str:
 
 
 # --------------------------------------------------------------------------
+# Spoken addresses with a local part: "name at example.com".
+# --------------------------------------------------------------------------
+
+def join_spoken_emails(text: str) -> str:
+    """Turn "<name> at <host>" into "<name>@<host>", when the utterance says so.
+
+    Runs after `join_spoken_urls`, so "child forensic dot com" is already a host
+    by the time this looks for one. Requires an EMAIL_CUE earlier in the
+    utterance and refuses a NOT_LOCAL token as the local part. See the comment
+    on EMAIL_CUES for why the cue is mandatory.
+
+    The local part is lowercased, which is the convention for an address and
+    undoes the capital the speech model puts on a name.
+    """
+    out: list[str] = []
+    cursor = 0
+
+    for match in _SPOKEN_EMAIL_RE.finditer(text):
+        if match.start() < cursor:
+            continue
+        local = match.group(1)
+        if local.lower() in NOT_LOCAL:
+            continue
+
+        # The cue has to be said before the address, not after it.
+        before = {w.lower() for w in _WORD_RE.findall(text[cursor:match.start()])}
+        if not (before & EMAIL_CUES):
+            continue
+
+        host = URL_RE.match(text, match.end())
+        if host is None:
+            continue
+        span = host.group(0)
+        # Only a bare host. A scheme is a link and an "@" is already an address.
+        if "@" in span or "//" in span:
+            continue
+
+        out.append(text[cursor:match.start()])
+        out.append(f"{local.lower()}@{span}")
+        cursor = host.end()
+
+    out.append(text[cursor:])
+    return "".join(out)
+
+
+# --------------------------------------------------------------------------
 # Written addresses: fix the host, never expand a term inside one.
 # --------------------------------------------------------------------------
 
@@ -337,18 +405,20 @@ def _replace_in_prose(text: str, terms: list[Term], threshold: float) -> str:
 # --------------------------------------------------------------------------
 
 def apply(text: str, protected: list[str], threshold: float = DEFAULT_THRESHOLD,
-          join_urls: bool = True) -> str:
+          join_urls: bool = True, join_emails: bool = False) -> str:
     """Snap near misses of every protected term onto the form you wrote.
 
     Joining spoken addresses does not depend on having any terms configured,
     so "google dot com" is still an address on an install that protects nothing.
     """
     terms = prepare(protected)
-    if not text or (not terms and not join_urls):
+    if not text or (not terms and not join_urls and not join_emails):
         return text
 
     if join_urls:
         text = join_spoken_urls(text, terms, threshold)
+    if join_emails:
+        text = join_spoken_emails(text)
     if not terms:
         return text
 

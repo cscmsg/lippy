@@ -114,6 +114,14 @@ class Config:
     # as "example.com" rather than as three words.
     spoken_urls: bool = True
 
+    # Join "<name> at <host>" into an address. Off by default: it can only fire
+    # when the speech model got the local part right, and when it did not the
+    # result still reads as a valid address. A plausible wrong address is worse
+    # than visibly unfinished text, so this is opt-in. An email cue word is
+    # required in the utterance, which is what keeps "look at example.com" and
+    # "the docs are at example.com" as prose.
+    spoken_emails: bool = False
+
     dictionary: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_DICTIONARY))
     protected_terms: list[str] = field(
         default_factory=lambda: list(DEFAULT_PROTECTED_TERMS))
@@ -204,6 +212,7 @@ class Config:
                 collapse_stutters=False,
                 spoken_commands=False,
                 spoken_urls=False,
+                spoken_emails=False,
                 dictionary={},
                 protected_terms=[],
                 spoken_numbers=False,
@@ -214,6 +223,7 @@ class Config:
             collapse_stutters=self.collapse_stutters,
             spoken_commands=self.spoken_commands,
             spoken_urls=self.spoken_urls,
+            spoken_emails=self.spoken_emails,
             dictionary=self.dictionary,
             protected_terms=self.protected_terms,
             fuzzy_threshold=self.fuzzy_threshold,

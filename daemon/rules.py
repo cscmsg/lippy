@@ -56,6 +56,7 @@ class RuleConfig:
     collapse_stutters: bool = True
     spoken_commands: bool = True
     spoken_urls: bool = True
+    spoken_emails: bool = False
     dictionary: dict[str, str] = field(default_factory=dict)
     protected_terms: list[str] = field(default_factory=list)
     fuzzy_threshold: float = terms_mod.DEFAULT_THRESHOLD
@@ -245,9 +246,10 @@ def clean(text: str, cfg: RuleConfig | None = None) -> str:
     # Terms run before the dictionary so that spoken addresses have already
     # been joined into real ones, which is what lets the dictionary pass hold
     # them out.
-    if cfg.protected_terms or cfg.spoken_urls:
+    if cfg.protected_terms or cfg.spoken_urls or cfg.spoken_emails:
         text = terms_mod.apply(text, cfg.protected_terms, cfg.fuzzy_threshold,
-                               join_urls=cfg.spoken_urls)
+                               join_urls=cfg.spoken_urls,
+                               join_emails=cfg.spoken_emails)
     used: list[str] = []
     if cfg.dictionary:
         text, used = _apply_dictionary(text, cfg.dictionary)
