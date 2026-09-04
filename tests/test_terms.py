@@ -244,3 +244,70 @@ def test_addresses_can_be_turned_off():
     assert terms.apply(text, [], join_urls=False) == text
     cfg = RuleConfig(spoken_urls=False)
     assert "example.com" not in clean(text, cfg)
+
+
+# --------------------------------------------------------------------------
+# Spoken addresses with a local part. The cue is what makes this safe.
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("spoken,expected", [
+    ("send it to alice at example.com",
+     "send it to alice@example.com"),
+    ("email alice at example dot com",
+     "email alice@example.com"),
+    ("cc alice at example.com please",
+     "cc alice@example.com please"),
+    ("forward it to alice at example.com",
+     "forward it to alice@example.com"),
+])
+def test_a_cue_makes_it_an_address(spoken, expected):
+    assert terms.apply(spoken, [], join_emails=True) == expected
+
+
+@pytest.mark.parametrize("text", [
+    "look at example.com for the download",
+    "the docs are at example.com",
+    "I saw it at example.com",
+    "meet me at the office",
+    "go to example.com and send it",          # cue comes after, not before
+    "email me the link at some point",        # no host
+])
+def test_without_a_cue_and_a_host_it_stays_prose(text):
+    assert terms.apply(text, [], join_emails=True) == text
+
+
+@pytest.mark.parametrize("text", [
+    "send it to him at example.com",
+    "send it to them at example.com",
+    "send the file, it is at example.com",
+])
+def test_a_pronoun_is_never_a_local_part(text):
+    assert terms.apply(text, [], join_emails=True) == text
+
+
+def test_the_local_part_is_lowercased():
+    # The speech model capitalises a name; an address does not want that.
+    assert terms.apply("email Alice at example.com", [], join_emails=True) == \
+        "email alice@example.com"
+
+
+def test_an_existing_address_is_left_alone():
+    text = "send it to alice@example.com now"
+    assert terms.apply(text, [], join_emails=True) == text
+
+
+def test_a_link_is_not_turned_into_an_address():
+    text = "send it to https://example.com/docs now"
+    assert terms.apply(text, [], join_emails=True) == text
+
+
+def test_off_by_default():
+    text = "send it to alice at example.com"
+    assert terms.apply(text, []) == text
+    assert clean(text) == "Send it to alice at example.com"
+
+
+def test_runs_through_the_full_clean_pass():
+    cfg = RuleConfig(spoken_emails=True)
+    assert clean("send it to alice at example dot com", cfg) == \
+        "Send it to alice@example.com"

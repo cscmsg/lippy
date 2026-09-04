@@ -269,6 +269,7 @@ when the key goes down rather than when it comes up.
   "protected_terms": ["Lex Cloak", "Monty Home"],
   "fuzzy_threshold": 0.80,
   "spoken_urls": true,
+  "spoken_emails": true,
   "spoken_numbers": true,
   "number_word_max": 12,
   "digit_triggers": ["/session start", "/session end"]
@@ -324,6 +325,31 @@ when the key goes down rather than when it comes up.
   does with *"lexcloak.app"* about half the time, the words that survive are
   *"Lex Cloak app"*, which is also an ordinary English phrase for the
   application itself. Nothing downstream can tell those apart, so nothing tries.
+- **`spoken_emails`**: **off by default.** Joins *"alice at example dot com"*
+  into `alice@example.com`.
+
+  It is opt-in for a specific reason. The rule can only be right when the speech
+  model got the local part right, and when it did not, the output still *reads*
+  as a valid address. A plausible wrong address is worse than visibly unfinished
+  text, so this is a choice rather than a default.
+
+  An email cue word must appear **before** the address in the same utterance
+  (*email, send, cc, forward, write, reach, contact, reply*…), which is what
+  keeps ordinary prose intact:
+
+  | Said | Written |
+  |---|---|
+  | `send it to alice at example.com` | `alice@example.com` |
+  | `look at example.com for the download` | unchanged |
+  | `the docs are at example.com` | unchanged |
+  | `send it to him at example.com` | unchanged (a pronoun is never a local part) |
+
+  The local part is lowercased, undoing the capital the speech model puts on a
+  name. A scheme (`https://…`) or an existing `@` is left alone.
+
+  **When the name is one the model reliably mishears, use a replacement instead.**
+  A `dictionary` entry mapping a phrase you choose to the whole address is exact,
+  where this rule can only ever be as good as the transcription it is given.
 - **`spoken_numbers`**: off by default, because this is a policy rather than a
   correction and a wrongly written number still reads as a number. The speech
   model already writes digits when the words around them make the purpose
